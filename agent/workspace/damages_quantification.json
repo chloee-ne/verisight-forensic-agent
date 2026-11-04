@@ -1,0 +1,7 @@
+{
+  "contract_cap_usd": "$4,187,500.00",
+  "uncapped_claim_usd": "$9,127,500.00",
+  "net_additional_exposure_usd": "$4,940,000.00",
+  "exposure_multiplier": "2.18x",
+  "legal_basis": "MSA Liability Cap Exception: Knowing Misrepresentation & Gross Negligence (21 open Sev-1 defects vs certified zero Sev-1 standard)"
+}
