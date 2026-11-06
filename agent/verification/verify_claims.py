@@ -4,16 +4,14 @@ Called by the submit_memo tool after verify_memo passes, and by ./helper verify 
 
     run_verification(ctx, memo) -> {"passed": bool, "feedback": [problem, ...]}
 
-One Muse Spark call judges every proven finding in the memo against its quotes.
+A failed or malformed model judgement must never approve a memo.
 """
 
 from __future__ import annotations
 
 import json
-from typing import cast
 
 from agent_kit.settings import model
-from openai.types.responses import Response
 
 PROMPT = """CLAIMS TO CHECK. Each finding below states a claim and the exact quotes cited for it.
 For each finding, decide whether the quotes support the claim as written. A claim that goes
@@ -25,6 +23,11 @@ Answer only with JSON: {{"unsupported": [{{"item": "<item>", "reason": "one sent
 (an empty list when every claim is supported)."""
 
 
+def _failure(message: str) -> dict:
+    """Return a verification failure, never an approval."""
+    return {"passed": False, "feedback": [message]}
+
+
 def run_verification(ctx, memo: dict) -> dict:
     findings = [
         {
@@ -33,28 +36,82 @@ def run_verification(ctx, memo: dict) -> dict:
             "quotes": [c.get("quote", "") for c in f.get("citations") or []],
         }
         for f in memo.get("findings") or []
-        if isinstance(f, dict) and f.get("status") == "proven" and f.get("citations")
+        if isinstance(f, dict)
+        and f.get("status") == "proven"
+        and f.get("citations")
     ]
+
     if not findings:
         return {"passed": True, "feedback": []}
-    response = cast(
-        Response,
-        ctx.client.responses.create(
+
+    try:
+        response = ctx.client.responses.create(
             model=model(),
             input=PROMPT.format(findings=json.dumps(findings, indent=1)),
             text={"format": {"type": "json_object"}},
-        ),
-    )
+        )
+    except Exception as error:
+        return _failure(
+            f"Claims verification could not be completed because the model API failed: "
+            f"{type(error).__name__}: {error}"
+        )
+
+    output_text = getattr(response, "output_text", None)
+    if not isinstance(output_text, str) or not output_text.strip():
+        return _failure(
+            "Claims verification failed: the model returned no readable response."
+        )
+
     try:
-        unsupported = json.loads(response.output_text).get("unsupported") or []
-    except (ValueError, AttributeError):
-        return {
-            "passed": True,
-            "feedback": [],
-        }  # an unreadable judgement never blocks the memo
-    problems = [
-        f"{u.get('item')}: the finding is not supported by its quotes ({u.get('reason', '')})"
-        for u in unsupported
-        if isinstance(u, dict)
-    ]
+        result = json.loads(output_text)
+    except (json.JSONDecodeError, TypeError):
+        return _failure(
+            "Claims verification failed: the model returned invalid JSON."
+        )
+
+    if not isinstance(result, dict):
+        return _failure(
+            "Claims verification failed: the response must be a JSON object."
+        )
+
+    if "unsupported" not in result or not isinstance(result["unsupported"], list):
+        return _failure(
+            "Claims verification failed: the response must contain an "
+            "'unsupported' list."
+        )
+
+    valid_items = {finding["item"] for finding in findings}
+
+    problems = []
+    for index, finding in enumerate(result["unsupported"]):
+        if not isinstance(finding, dict):
+            return _failure(
+                f"Claims verification failed: unsupported entry {index + 1} "
+                "is not an object."
+            )
+
+        item = finding.get("item")
+        reason = finding.get("reason")
+
+        if (
+            not isinstance(item, str)
+            or not item.strip()
+            or not isinstance(reason, str)
+            or not reason.strip()
+        ):
+            return _failure(
+                f"Claims verification failed: unsupported entry {index + 1} "
+                "must contain non-empty string fields 'item' and 'reason'."
+            )
+
+        if item not in valid_items:
+            return _failure(
+                f"Claims verification failed: unsupported entry {index + 1} "
+                f"references unknown memo item '{item}'."
+            )
+
+        problems.append(
+            f"{item}: the finding is not supported by its quotes ({reason})"
+        )
+
     return {"passed": not problems, "feedback": problems}

@@ -8,6 +8,11 @@ import json
 import os
 import unittest
 
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+from verification import verify_claims
+
 from agent_kit import tools
 from agent_kit.case_record import CaseRecord
 from agent_kit.progress import branch, new_run
@@ -174,8 +179,141 @@ def context(root, client, run_id: str = "") -> tools.Context:
     run_id = run_id or new_run(root, instructions="i", objective="o")
     return tools.Context(client, root, run_id, CaseRecord(root, run_id), True)
 
-
 @SKIP
+class VerifyClaimsFailureTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.memo = {
+            "findings": [
+                {
+                    "item": "timing",
+                    "status": "proven",
+                    "summary": "The vendor issued a no-go recommendation.",
+                    "citations": [
+                        {"quote": "Recommendation: NO-GO"}
+                    ],
+                }
+            ]
+        }
+
+    def run_check(self, output_text: str):
+        client = SimpleNamespace(
+            responses=SimpleNamespace(
+                create=Mock(
+                    return_value=SimpleNamespace(output_text=output_text)
+                )
+            )
+        )
+        ctx = SimpleNamespace(client=client)
+        return verify_claims.run_verification(ctx, self.memo)
+
+    def test_valid_empty_unsupported_list_passes(self) -> None:
+        result = self.run_check('{"unsupported": []}')
+        self.assertTrue(result["passed"])
+        self.assertEqual([], result["feedback"])
+
+    def test_unsupported_claim_fails(self) -> None:
+        result = self.run_check(
+            '{"unsupported": [{"item": "timing", '
+            '"reason": "the quote does not establish a date"}]}'
+        )
+        self.assertFalse(result["passed"])
+        self.assertIn("timing", result["feedback"][0])
+
+    def test_unknown_item_fails_closed(self) -> None:
+        result = self.run_check(
+            '{"unsupported": [{"item": "fake_item", '
+            '"reason": "unsupported"}]}'
+        )
+        self.assertFalse(result["passed"])
+        self.assertIn("unknown memo item", result["feedback"][0])
+
+    def test_non_string_response_fails_closed(self) -> None:
+        client = SimpleNamespace(
+            responses=SimpleNamespace(
+                create=Mock(
+                    return_value=SimpleNamespace(output_text=None)
+                )
+            )
+        )
+        ctx = SimpleNamespace(client=client)
+
+        result = verify_claims.run_verification(ctx, self.memo)
+
+        self.assertFalse(result["passed"])
+        self.assertIn("no readable response", result["feedback"][0])
+    def test_invalid_json_fails_closed(self) -> None:
+        result = self.run_check("not valid JSON")
+        self.assertFalse(result["passed"])
+        self.assertIn("invalid JSON", result["feedback"][0])
+
+    def test_missing_unsupported_field_fails_closed(self) -> None:
+        result = self.run_check('{"result": "supported"}')
+        self.assertFalse(result["passed"])
+        self.assertIn("unsupported", result["feedback"][0])
+
+    def test_non_list_unsupported_fails_closed(self) -> None:
+        result = self.run_check('{"unsupported": "none"}')
+        self.assertFalse(result["passed"])
+        self.assertIn("'unsupported' list", result["feedback"][0])
+
+    def test_unsupported_entry_missing_fields_fails_closed(self) -> None:
+        result = self.run_check(
+            '{"unsupported": [{"item": "timing"}]}'
+        )
+        self.assertFalse(result["passed"])
+        self.assertIn("non-empty string fields", result["feedback"][0])
+    def test_model_api_failure_fails_closed(self) -> None:
+        client = SimpleNamespace(
+            responses=SimpleNamespace(
+                create=Mock(side_effect=RuntimeError("API unavailable"))
+            )
+        )
+        ctx = SimpleNamespace(client=client)
+
+        result = verify_claims.run_verification(ctx, self.memo)
+
+        self.assertFalse(result["passed"])
+        self.assertIn("API failed", result["feedback"][0])
+
+class VerifyHelperOrderTest(unittest.TestCase):
+    def test_claims_check_is_skipped_when_memo_rules_fail(self) -> None:
+        ctx = SimpleNamespace(
+            case=SimpleNamespace(
+                data={
+                    "memo": {
+                        "conclusion": "Test",
+                        "findings": [],
+                        "gaps": [],
+                    }
+                }
+            )
+        )
+
+        rules = SimpleNamespace(
+            run_verification=Mock(
+                return_value={
+                    "passed": False,
+                    "feedback": ["memo rules failed"],
+                }
+            )
+        )
+        claims_check = Mock()
+
+        original_import = verify.importlib.import_module
+        original_claims = verify.verify_claims.run_verification
+
+        try:
+            verify.importlib.import_module = Mock(return_value=rules)
+            verify.verify_claims.run_verification = claims_check
+            result = verify.verify_memo(ctx)
+        finally:
+            verify.importlib.import_module = original_import
+            verify.verify_claims.run_verification = original_claims
+
+        self.assertFalse(result["passed"])
+        self.assertIn("memo rules failed", result["rules"])
+        claims_check.assert_not_called()
+
 class ChecklistCheckTest(unittest.TestCase):
     """verification/verify_checklist.py: the agent's checklist against the ground truth."""
 
@@ -216,7 +354,6 @@ class ChecklistCheckTest(unittest.TestCase):
         result = self.verify(self.ctx, support.PARTIAL_CHECKLIST[1]["items"])
         self.assertEqual((True, None), (result["passed"], result["score"]))
 
-
 @SKIP
 class MemoRulesTest(unittest.TestCase):
     """verification/verify_memo.py: the memo rules."""
@@ -247,6 +384,57 @@ class MemoRulesTest(unittest.TestCase):
         self.assertTrue(any("neither proven nor escalated" in p for p in found))
         self.assertTrue(any("no matching recorded fact" in p for p in found))
         self.assertTrue(any("no finding for not_ready" in p for p in found))
+
+
+    def test_malformed_memo_inputs_fail_closed(self) -> None:
+        invalid_memos = [
+            "not an object",
+            {"findings": "not a list"},
+            {"findings": [None]},
+            {
+                "findings": [
+                    {
+                        "item": "unknown_item",
+                        "status": "proven",
+                        "summary": "Unknown item",
+                        "citations": [],
+                    }
+                ]
+            },
+            {
+                "findings": [
+                    {
+                        "item": "not_ready",
+                        "status": "proven",
+                        "summary": "Invalid citations",
+                        "citations": "not a list",
+                    }
+                ]
+            },
+            {
+                "findings": [
+                    {
+                        "item": "not_ready",
+                        "status": "proven",
+                        "summary": "Invalid page",
+                        "citations": [
+                            {
+                                "document_id": "DOC-REPORT",
+                                "page": True,
+                                "quote": "Some evidence",
+                            }
+                        ],
+                    }
+                ]
+            },
+        ]
+
+        for memo in invalid_memos:
+            with self.subTest(memo=memo):
+                result = self.verify(self.ctx, memo)
+                self.assertFalse(result["passed"])
+                self.assertTrue(result["feedback"])
+
 
     def signature_finding(self) -> dict:
         support.release(self.root)
@@ -334,6 +522,100 @@ class MemoRulesTest(unittest.TestCase):
         )
         self.assertEqual([], self.problems(GOOD_MEMO[1]))
 
+    def test_duplicate_findings_for_the_same_item_are_rejected(self) -> None:
+        self.read(["DOC-REPORT"])
+        self.case.record_fact(
+            "not_ready",
+            "DOC-REPORT",
+            1,
+            "Open Severity 1 defects: 21",
+            "21 Sev-1 defects remain open",
+        )
+
+        finding = cite(
+            "not_ready",
+            "DOC-REPORT",
+            "Open Severity 1 defects: 21",
+        )
+
+        memo = {
+            "findings": [
+                finding,
+                dict(finding),
+            ]
+        }
+
+        found = self.problems(memo)
+
+        self.assertTrue(
+            any("duplicate" in problem.lower() for problem in found),
+            found,
+        )
+
+    def test_a_fact_cannot_be_cited_for_a_different_checklist_item(self) -> None:
+        self.read(["DOC-REPORT"])
+        # Record a fact for the actual checklist item.
+        self.case.record_fact(
+            "not_ready",
+            "DOC-REPORT",
+            1,
+            "Open Severity 1 defects: 21",
+            "21 Sev-1 defects remain open",
+        )
+
+        # Mark counterevidence as proven using a different quote.
+        self.case.record_fact(
+            "counterevidence",
+            "DOC-REPORT",
+            1,
+            "Overall status is green",
+            "The report stated overall status was green",
+        )
+
+        # Incorrectly cite the not_ready fact under counterevidence.
+        memo = {
+            "findings": [
+                cite(
+                    "counterevidence",
+                    "DOC-REPORT",
+                    "Open Severity 1 defects: 21",
+                )
+            ]
+        }
+
+        found = self.problems(memo)
+
+        self.assertTrue(
+            any("no matching recorded fact" in problem for problem in found),
+            found,
+        )
+    def test_a_proven_checklist_item_cannot_be_escalated_in_the_memo(self) -> None:
+        self.read(["DOC-REPORT"])
+        self.case.record_fact(
+            "not_ready",
+            "DOC-REPORT",
+            1,
+            "Open Severity 1 defects: 21",
+            "21 Sev-1 defects remain open",
+        )
+
+        memo = {
+            "findings": [
+                {
+                    "item": "not_ready",
+                    "status": "escalated",
+                    "summary": "The issue requires further investigation.",
+                    "citations": [],
+                }
+            ]
+        }
+
+        found = self.problems(memo)
+
+        self.assertTrue(
+            any("not_ready" in problem for problem in found),
+            found,
+        )
 
 @SKIP
 class VerifiedRunTest(unittest.TestCase):

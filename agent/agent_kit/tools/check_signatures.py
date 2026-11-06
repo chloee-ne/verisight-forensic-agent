@@ -141,9 +141,9 @@ def run(ctx: Context, args: dict) -> dict:
         raw_text = cast(Response, resp).output_text.strip()
         m = re.search(r"\{.*\}", raw_text, re.DOTALL)
         parsed = json.loads(m.group(0)) if m else {}
-        verdict = str(parsed.get("verdict", "inconsistent")).lower()
+        verdict = str(parsed.get("verdict", "unclear")).lower()
         if verdict not in VERDICTS:
-            verdict = "inconsistent"
+            verdict = "unclear"
         reason = str(parsed.get("reason", raw_text[:200]))
     except Exception as e:
         verdict = "unclear"

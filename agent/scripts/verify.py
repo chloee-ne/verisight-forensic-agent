@@ -45,14 +45,19 @@ def verify_memo(ctx: tools.Context) -> dict:
     rules = importlib.import_module("verification.verify_memo").run_verification(
         ctx, memo
     )
-    claims = verify_claims.run_verification(ctx, memo)
+
+    claims = (
+        verify_claims.run_verification(ctx, memo)
+        if rules.get("passed")
+        else {"passed": False, "feedback": []}
+    )
+
     return {
         "what": "memo",
         "passed": bool(rules.get("passed") and claims.get("passed")),
         "rules": [str(p) for p in rules.get("feedback") or []],
         "claims": [str(p) for p in claims.get("feedback") or []],
     }
-
 
 def verify_checklist(ctx: tools.Context) -> dict:
     checklist = ctx.case.data["checklist"]

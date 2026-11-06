@@ -122,6 +122,16 @@ class ScriptedModel:
                 "output_text": json.dumps({"unsupported": self.unsupported(text)}),
                 "usage": {"input_tokens": 1800, "output_tokens": 60},
             }
+        if "Compare the handwritten signature" in text:
+            return {
+                "output_text": json.dumps(
+                    {
+                        "verdict": "consistent",
+                        "reason": "The reference and questioned signatures show similar visible features.",
+                    }
+                ),
+                "usage": {"input_tokens": 1800, "output_tokens": 60},
+            }
         match = DOC_ID.search(text)
         doc = match.group(1) if match else ""
         pages = self.transcripts.get(doc, [{"page": 1, "text": ""}])
