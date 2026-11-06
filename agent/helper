@@ -1,20 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The agent's own Python: ./helper setup creates .venv here and installs requirements.txt.
+# Find the virtual environment's Python on Windows or POSIX systems.
+venv_python() {
+  if [[ -x .venv/Scripts/python.exe ]]; then
+    printf '%s\n' ".venv/Scripts/python.exe"
+  elif [[ -x .venv/bin/python ]]; then
+    printf '%s\n' ".venv/bin/python"
+  else
+    return 1
+  fi
+}
+
+# Use the virtual environment when it already exists.
 if [[ -z "${PYTHON:-}" ]]; then
-  if [[ -x .venv/bin/python ]]; then PYTHON=.venv/bin/python; else PYTHON=python3; fi
+  PYTHON="$(venv_python 2>/dev/null || true)"
+  if [[ -z "$PYTHON" ]]; then
+    PYTHON=python3
+  fi
 fi
+
 COMMAND="${1:-help}"
 shift || true
 
 load_env() {
-  # CASE_DIR set in the environment wins over .env: CASE_DIR=../cases/other ./helper setup
+  # CASE_DIR set in the environment wins over .env.
   local case_dir="${CASE_DIR:-}"
   if [[ -f .env ]]; then
     set -a
+    # Normalize Windows CRLF line endings before sourcing.
     # shellcheck disable=SC1091
-    source .env
+    source <(sed 's/\r$//' .env)
     set +a
   fi
   if [[ -n "$case_dir" ]]; then export CASE_DIR="$case_dir"; fi
@@ -23,9 +39,22 @@ load_env() {
 case "$COMMAND" in
   setup)
     [[ -f .env ]] || cp .env.example .env
-    [[ -x .venv/bin/python ]] || python3 -m venv .venv
-    .venv/bin/python -m pip install --quiet --disable-pip-version-check -r requirements.txt
-    PYTHON=.venv/bin/python
+
+    # Create the virtual environment if it does not exist.
+    if ! venv_python >/dev/null 2>&1; then
+      PYTHON_BOOTSTRAP=python3
+      if ! command -v "$PYTHON_BOOTSTRAP" >/dev/null 2>&1; then
+        PYTHON_BOOTSTRAP=python
+      fi
+      if ! command -v "$PYTHON_BOOTSTRAP" >/dev/null 2>&1; then
+        echo "Python 3 is required. Install Python 3 and try again." >&2
+        exit 1
+      fi
+      "$PYTHON_BOOTSTRAP" -m venv .venv
+    fi
+
+    PYTHON="$(venv_python)"
+    "$PYTHON" -m pip install --quiet --disable-pip-version-check -r requirements.txt
     load_env
     "$PYTHON" scripts/reset_case.py
     "$PYTHON" scripts/preflight.py --expect-release initial --check-key
@@ -55,14 +84,18 @@ case "$COMMAND" in
     ;;
   test)
     load_env
-    if [[ "${1:-}" == "--verification" ]]; then export VERIFICATION=on; else export VERIFICATION=off; fi
+    if [[ "${1:-}" == "--verification" ]]; then
+      export VERIFICATION=on
+    else
+      export VERIFICATION=off
+    fi
     "$PYTHON" scripts/preflight.py --expect-release auto
     "$PYTHON" -m unittest discover -s tests
     ;;
   *)
     cat >&2 <<'USAGE'
 Usage: ./helper COMMAND
-  setup                                  create .venv, copy the case's documents, check MODEL_API_KEY
+  setup                                  create .venv, install requirements, check MODEL_API_KEY
   test [--verification]                  offline tests (no API calls)
   run [--turns N] [--resume RUN_ID]      run the agent, or continue a run
   verify RUN_ID --memo | --checklist     run the verification checks on a finished run
