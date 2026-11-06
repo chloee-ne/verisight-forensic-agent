@@ -169,7 +169,9 @@ def _item_problems(case, item: str, entry: dict, finding: dict) -> list:
             "record a fact or call request_evidence"
         )
     elif checklist_status in ("proven", "escalated"):
-        if finding_status != checklist_status:
+        # The checklist records evidence collection; the memo records
+        # the conclusion. Recorded facts can exist without proving a claim.
+        if finding_status not in (checklist_status, "not_proven"):
             problems.append(
                 f"{item} is {checklist_status} in the checklist "
                 f"but {finding_status} in the memo"
@@ -202,21 +204,21 @@ def _item_problems(case, item: str, entry: dict, finding: dict) -> list:
 
 
 def _signature_problems(case, item: str, citations: list) -> list:
-    cited = {
-        citation["document_id"]
+    cited_pages = {
+        (citation["document_id"], citation["page"])
         for citation in citations
     }
 
     checks = [
         check
         for check in case.data["signature_checks"]
-        if check.get("document_id") in cited
+        if (check.get("document_id"), check.get("page")) in cited_pages
     ]
 
     if not checks:
         return [
-            f"{item} rests on a signature, but no cited document "
-            "was checked with check_signatures"
+            f"{item} rests on a signature, but no cited document was checked "
+            "with check_signatures on the cited page"
         ]
 
     return [

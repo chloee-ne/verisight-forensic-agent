@@ -14,6 +14,7 @@ from unittest.mock import Mock
 from verification import verify_claims
 
 from agent_kit import tools
+from agent_kit.tools.submit_memo import _escalation_item
 from agent_kit.case_record import CaseRecord
 from agent_kit.progress import branch, new_run
 from agent_kit.settings import verification_enabled
@@ -772,11 +773,11 @@ class VerifiedRunTest(unittest.TestCase):
             self.root, [support.CHECKLIST, READ_ALL, EARLY_MEMO, EARLY_MEMO, EARLY_MEMO]
         )
         result = self.run_agent(root=self.root, client=fake.client, turns=10)
-        self.assertEqual(("needs_input", 5), (result["status"], result["turn"]))
-        self.assertEqual(
-            "memo_refused",
-            support.case(self.root, result["run_id"])["requests"][0]["rule"],
-        )
+        self.assertEqual(("paused", 10), (result["status"], result["turn"]))
+        case = support.case(self.root, result["run_id"])
+        self.assertEqual([], case["requests"])
+        refusal = self.tool_results(result["run_id"], "submit_memo")[-1]
+        self.assertIn("no single checklist item", refusal["error"])
 
     def test_a_flagged_document_cannot_be_read_again(self) -> None:
         reread = ("analyze_document", {"document_ids": ["DOC-MEMO"], "request": "x"})
@@ -786,6 +787,32 @@ class VerifiedRunTest(unittest.TestCase):
             "confidential",
             self.tool_results(result["run_id"], "analyze_document")[-1]["error"],
         )
+
+
+class EscalationItemTest(unittest.TestCase):
+    def test_selects_the_only_item_named_in_a_problem(self) -> None:
+        checklist = {
+            "timing": {"status": "proven"},
+            "signatures": {"status": "proven"},
+            "damages": {"status": "open"},
+        }
+        problems = ["signatures is proven in the checklist but not_proven in the memo"]
+        self.assertEqual("signatures", _escalation_item(checklist, problems))
+
+    def test_does_not_guess_when_multiple_items_are_named(self) -> None:
+        checklist = {
+            "timing": {"status": "proven"},
+            "signatures": {"status": "proven"},
+        }
+        problems = ["timing has no finding", "signatures has no finding"]
+        self.assertIsNone(_escalation_item(checklist, problems))
+
+    def test_does_not_guess_when_multiple_items_are_open(self) -> None:
+        checklist = {
+            "timing": {"status": "open"},
+            "signatures": {"status": "open"},
+        }
+        self.assertIsNone(_escalation_item(checklist, ["memo is incomplete"]))
 
 
 @SKIP

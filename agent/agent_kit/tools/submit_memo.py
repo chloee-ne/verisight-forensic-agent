@@ -10,6 +10,7 @@ for attorney sign-off (awaiting_signoff).
 from __future__ import annotations
 
 import importlib
+import re
 from typing import TYPE_CHECKING
 
 from .request_evidence import escalate
@@ -18,6 +19,45 @@ if TYPE_CHECKING:
     from . import Context
 
 MAX_REFUSALS = 3
+
+
+def _escalation_item(checklist: dict, problems: list[str]) -> str | None:
+    """Identify one checklist item clearly implicated by memo errors."""
+    implicated = set()
+
+    for problem in problems:
+        mentions = [
+            item
+            for item in checklist
+            if re.search(
+                rf"(?<![A-Za-z0-9_]){re.escape(item)}(?![A-Za-z0-9_])",
+                problem,
+            )
+        ]
+        if len(mentions) == 1:
+            implicated.add(mentions[0])
+
+    if len(implicated) == 1:
+        return next(iter(implicated))
+
+    if len(implicated) > 1:
+        open_items = [
+            item
+            for item in checklist
+            if item in implicated
+            and checklist[item].get("status") == "open"
+        ]
+        return open_items[0] if len(open_items) == 1 else None
+
+    # A generic error can identify an item only when there is exactly
+    # one unresolved checklist item. Never fall back to the first item.
+    open_items = [
+        item
+        for item, entry in checklist.items()
+        if entry.get("status") == "open"
+    ]
+    return open_items[0] if len(open_items) == 1 else None
+
 
 ITEM = {
     "type": "string",
@@ -90,10 +130,14 @@ def run(ctx: Context, args: dict) -> dict:
     if problems:
         if ctx.case.memo_refusals() >= MAX_REFUSALS:
             checklist = ctx.case.data["checklist"]
-            item = next(
-                (k for k, v in checklist.items() if v["status"] == "open"),
-                next(iter(checklist), ""),
-            )
+            item = _escalation_item(checklist, problems)
+            if item is None:
+                return {
+                    "error": "memo refused; no single checklist item "
+                    "could be identified for escalation",
+                    "check": check,
+                    "problems": problems,
+                }
             need = (
                 f"The memo was refused {ctx.case.memo_refusals()} times. Last problems: "
                 + "; ".join(problems)
