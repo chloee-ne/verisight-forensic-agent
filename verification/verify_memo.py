@@ -1,29 +1,257 @@
-"""The memo rules. run_verification is not implemented yet.
-
-Called when the agent calls submit_memo with VERIFICATION=on, and by
+"""The memo rules. Called when the agent calls submit_memo with VERIFICATION=on, and by
 ./helper verify RUN --memo.
 
     run_verification(ctx, memo) -> {"passed": bool, "feedback": [problem, ...]}
-
-memo = {"conclusion": str, "findings": [{"item", "status", "summary", "citations": [
-{"document_id", "page", "quote"}]}], "gaps": str}. ctx.case is the run's CaseRecord:
-case.data["checklist"], case.data["facts"], case.data["signature_checks"] (each with
-document_id, page, verdict), case.flagged(document_id), case.open_requests(). Compare
-quotes with agent_kit.document_text.normalize.
-
-Rules (one problem string per break, which the agent reads and fixes; passed = no problems):
-- every checklist item has a finding, and is proven or escalated (status "open" is a problem);
-- a finding marked "proven" has a recorded fact for its item, and cites at least one;
-- every citation matches a recorded fact (same document, page, and quote);
-- no citation is from a document flagged confidential;
-- an item with needs_signature_check that is marked proven has a signature check on a
-  document it cites, and every such check's verdict is "consistent" (otherwise the item
-  is not proven: say so, and name it as a gap);
-- no evidence request is still open.
 """
 
 from __future__ import annotations
 
+from agent_kit.document_text import normalize
+
+
+def _failure(message: str) -> dict:
+    """Return a verification failure, never an approval."""
+    return {"passed": False, "feedback": [message]}
+
+
+def _validate_findings(memo: dict, checklist: dict) -> tuple | dict:
+    """Validate memo structure before applying business rules."""
+    raw_findings = memo.get("findings", [])
+
+    if raw_findings is None:
+        raw_findings = []
+
+    if not isinstance(raw_findings, list):
+        return _failure("memo findings must be a list")
+
+    findings = {}
+    problems = []
+
+    for index, finding in enumerate(raw_findings):
+        label = f"finding {index + 1}"
+
+        if not isinstance(finding, dict):
+            return _failure(f"{label} must be an object")
+
+        item = finding.get("item")
+        if not isinstance(item, str) or not item.strip():
+            return _failure(
+                f"{label} must contain a non-empty string 'item'"
+            )
+
+        if item not in checklist:
+            return _failure(
+                f"{label} references unknown checklist item '{item}'"
+            )
+
+        status = finding.get("status")
+        if status not in ("proven", "not_proven", "escalated"):
+            return _failure(
+                f"{label} has an invalid status for checklist item '{item}'"
+            )
+
+        if not isinstance(finding.get("summary"), str):
+            return _failure(
+                f"{label} must contain a string 'summary'"
+            )
+
+        citations = finding.get("citations")
+        if not isinstance(citations, list):
+            return _failure(
+                f"{label} must contain a list 'citations'"
+            )
+
+        if len(citations) > 3:
+            return _failure(
+                f"{label} contains more than 3 citations"
+            )
+
+        for citation_index, citation in enumerate(citations):
+            citation_label = (
+                f"{label} citation {citation_index + 1}"
+            )
+
+            if not isinstance(citation, dict):
+                return _failure(
+                    f"{citation_label} must be an object"
+                )
+
+            document_id = citation.get("document_id")
+            if (
+                not isinstance(document_id, str)
+                or not document_id.strip()
+            ):
+                return _failure(
+                    f"{citation_label} must contain a non-empty "
+                    "'document_id'"
+                )
+
+            page = citation.get("page")
+            if not isinstance(page, int) or isinstance(page, bool):
+                return _failure(
+                    f"{citation_label} must contain an integer 'page'"
+                )
+
+            quote = citation.get("quote")
+            if not isinstance(quote, str) or not quote.strip():
+                return _failure(
+                    f"{citation_label} must contain a non-empty string "
+                    "'quote'"
+                )
+
+        if item in findings:
+            problems.append(
+                f"duplicate finding for checklist item {item}"
+            )
+            continue
+
+        findings[item] = finding
+
+    return findings, problems
+
 
 def run_verification(ctx, memo: dict) -> dict:
-    raise NotImplementedError("verification/verify_memo.py is not implemented yet")
+    case = ctx.case
+    checklist = case.data["checklist"]
+
+    if not checklist:
+        return {
+            "passed": False,
+            "feedback": [
+                "there is no checklist yet: call set_checklist first"
+            ],
+        }
+
+    if not isinstance(memo, dict):
+        return _failure("memo must be an object")
+
+    validation = _validate_findings(memo, checklist)
+
+    if isinstance(validation, dict):
+        return validation
+
+    findings, problems = validation
+
+    for item, entry in checklist.items():
+        finding = findings.get(item)
+
+        if finding is None:
+            problems.append(f"no finding for {item}")
+            continue
+
+        problems += _item_problems(
+            case,
+            item,
+            entry,
+            finding,
+        )
+
+    if case.open_requests():
+        problems.append("an evidence request is still open")
+
+    return {
+        "passed": not problems,
+        "feedback": problems,
+    }
+
+
+def _item_problems(case, item: str, entry: dict, finding: dict) -> list:
+    problems = []
+
+    checklist_status = entry.get("status")
+    finding_status = finding.get("status")
+    proven = finding_status == "proven"
+    citations = finding["citations"]
+
+    if checklist_status == "open":
+        problems.append(
+            f"{item} is neither proven nor escalated: "
+            "record a fact or call request_evidence"
+        )
+    elif checklist_status in ("proven", "escalated"):
+        # The checklist records evidence collection; the memo records
+        # the conclusion. Recorded facts can exist without proving a claim.
+        if finding_status not in (checklist_status, "not_proven"):
+            problems.append(
+                f"{item} is {checklist_status} in the checklist "
+                f"but {finding_status} in the memo"
+            )
+    else:
+        problems.append(
+            f"{item} has an invalid checklist status: {checklist_status}"
+        )
+
+    if proven and not citations:
+        problems.append(
+            f"{item} is marked proven but cites nothing"
+        )
+
+    if proven and entry.get("needs_signature_check"):
+        problems += _signature_problems(
+            case,
+            item,
+            citations,
+        )
+
+    for citation in citations:
+        problems += _citation_problems(
+            case,
+            item,
+            citation,
+        )
+
+    return problems
+
+
+def _signature_problems(case, item: str, citations: list) -> list:
+    cited_pages = {
+        (citation["document_id"], citation["page"])
+        for citation in citations
+    }
+
+    checks = [
+        check
+        for check in case.data["signature_checks"]
+        if (check.get("document_id"), check.get("page")) in cited_pages
+    ]
+
+    if not checks:
+        return [
+            f"{item} rests on a signature, but no cited document was checked "
+            "with check_signatures on the cited page"
+        ]
+
+    return [
+        f"{item} is marked proven, but the signature on "
+        f"{check['document_id']} p{check.get('page')} is "
+        f"{check.get('verdict')}: mark the item not proven "
+        "and name it as a gap"
+        for check in checks
+        if check.get("verdict") != "consistent"
+    ]
+
+
+def _citation_problems(case, item: str, citation: dict) -> list:
+    document_id = citation["document_id"]
+    page = citation["page"]
+
+    if case.flagged(document_id):
+        return [
+            f"{document_id} is confidential and can never be cited"
+        ]
+
+    quote = normalize(citation["quote"])
+
+    if any(
+        fact["item"] == item
+        and fact["document_id"] == document_id
+        and fact["page"] == page
+        and normalize(fact["quote"]) == quote
+        for fact in case.data["facts"]
+    ):
+        return []
+
+    return [
+        f"citation has no matching recorded fact for checklist item "
+        f"{item}: {document_id} p{page}"
+    ]

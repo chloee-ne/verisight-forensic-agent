@@ -235,14 +235,22 @@ class KitTest(unittest.TestCase):
     def test_base_tools_without_verification_and_three_more_with_it(self) -> None:
         names = [t["name"] for t in tools.definitions(self.root, self.run_id)]
         self.assertEqual(tools.BASE_TOOLS, names)
+
         verified = new_run(
             self.root, instructions="i", objective="o", verification=True
         )
         names = [t["name"] for t in tools.definitions(self.root, verified)]
-        self.assertEqual(
-            ["flag_privileged", "request_evidence", "check_signatures"], names[6:]
-        )
 
+        expected_verifier_tools = [
+            "flag_privileged",
+            "request_evidence",
+            "check_signatures",
+        ]
+
+        self.assertEqual(
+            expected_verifier_tools,
+            names[len(tools.BASE_TOOLS):],
+        )
     def test_a_filed_memo_ends_the_run_without_verification(self) -> None:
         result = self.tool("submit_memo", support.MEMO[1])
         self.assertEqual(("answered", "unverified"), (result["status"], result["memo"]))
@@ -269,21 +277,81 @@ class KitTest(unittest.TestCase):
             ("not implemented yet", "paused"), (result["error"], result["status"])
         )
 
-    def test_check_signatures_is_a_placeholder_that_names_its_reference(self) -> None:
+    def test_check_signatures_compares_a_distinct_reference_page(self) -> None:
         run_id = new_run(self.root, instructions="i", objective="o", verification=True)
         args = {"document_id": "DOC-REF", "page": 1, "signer": "Dana Okafor"}
         same = dict(args, reference_document_id="DOC-REF", reference_page=1)
         self.assertIn(
             "different page", self.tool("check_signatures", same, run_id)["error"]
         )
+
         other = dict(args, reference_document_id="DOC-MEMO", reference_page=1)
-        result = self.tool("check_signatures", other, run_id)
+        response = mock.Mock()
+        response.output_text = json.dumps({
+            "verdict": "consistent",
+            "reason": "The visible signature features appear similar.",
+        })
+        with mock.patch.object(
+            self.client.responses, "create", return_value=response
+        ):
+            result = self.tool("check_signatures", other, run_id)
+
         self.assertEqual("consistent", result["verdict"])
         check = CaseRecord(self.root, run_id).data["signature_checks"][0]
         self.assertEqual(
             {"document_id": "DOC-MEMO", "page": 1, "boxes": []}, check["reference"]
         )
+    def test_invalid_signature_verdict_defaults_to_unclear(self) -> None:
+        run_id = new_run(
+            self.root, instructions="i", objective="o", verification=True
+        )
+        args = {
+            "document_id": "DOC-REF",
+            "page": 1,
+            "signer": "Dana Okafor",
+            "reference_document_id": "DOC-MEMO",
+            "reference_page": 1,
+        }
 
+        for response_text in (
+            '{"verdict": "suspicious", "reason": "Invalid verdict"}',
+            "This is not valid JSON",
+        ):
+            with self.subTest(response=response_text):
+                response = mock.Mock()
+                response.output_text = response_text
+
+                with mock.patch.object(
+                    self.client.responses,
+                    "create",
+                    return_value=response,
+                ):
+                    result = self.tool("check_signatures", args, run_id)
+
+                self.assertEqual("unclear", result["verdict"])
+
+    def test_signature_api_failure_defaults_to_unclear(self) -> None:
+        run_id = new_run(
+            self.root, instructions="i", objective="o", verification=True
+        )
+        args = {
+            "document_id": "DOC-REF",
+            "page": 1,
+            "signer": "Dana Okafor",
+            "reference_document_id": "DOC-MEMO",
+            "reference_page": 1,
+        }
+
+        with mock.patch.object(
+            self.client.responses,
+            "create",
+            side_effect=RuntimeError("API unavailable"),
+        ) as create:
+            result = self.tool("check_signatures", args, run_id)
+
+        self.assertEqual("unclear", result["verdict"])
+        self.assertIn("warning", result["reason"].lower())
+        self.assertEqual(2, create.call_count)  # Two SAM attempts; no Muse call.
     # ---- pre-built checks ------------------------------------------------------------
     def ctx(self) -> tools.Context:
         return tools.Context(
@@ -293,6 +361,20 @@ class KitTest(unittest.TestCase):
             CaseRecord(self.root, self.run_id),
             True,
         )
+
+    def test_review_memo_rejects_non_boolean_decisions_without_mutation(self) -> None:
+        case = self.case()
+        case.file_memo({"findings": []}, "awaiting_signoff")
+        original = json.loads(json.dumps(case.data["memo"]))
+        event_count = len(case.data["audit"])
+
+        for invalid in ("false", 1, None):
+            with self.subTest(approve=invalid):
+                with self.assertRaises(CaseError):
+                    case.review_memo(invalid)
+
+                self.assertEqual(original, case.data["memo"])
+                self.assertEqual(event_count, len(case.data["audit"]))
 
     def test_verify_claims_reports_unsupported_findings(self) -> None:
         from verification import verify_claims

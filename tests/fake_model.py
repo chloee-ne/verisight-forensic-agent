@@ -81,6 +81,7 @@ class ScriptedModel:
         evidence: Callable[[str, list], list] | None = None,
         unsupported: Callable[[str], list] | None = None,
         feedback: str = FEEDBACK,
+        signature_verdict: str = "unclear",
     ) -> None:
         self.transcripts = transcripts
         self.planner = planner
@@ -88,6 +89,7 @@ class ScriptedModel:
         self.evidence = evidence or default_evidence
         self.unsupported = unsupported or (lambda text: [])
         self.feedback = feedback
+        self.signature_verdict = signature_verdict
         self.n = 0
 
     def __call__(self, kind: str, payload) -> dict:
@@ -121,6 +123,14 @@ class ScriptedModel:
             return {
                 "output_text": json.dumps({"unsupported": self.unsupported(text)}),
                 "usage": {"input_tokens": 1800, "output_tokens": 60},
+            }
+        if "You are performing a visual signature consistency check" in text:
+            return {
+                "output_text": json.dumps({
+                    "verdict": self.signature_verdict,
+                    "reason": "Scripted test response; not an authentication of authorship.",
+                }),
+                "usage": {"input_tokens": 1200, "output_tokens": 50},
             }
         match = DOC_ID.search(text)
         doc = match.group(1) if match else ""

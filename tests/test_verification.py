@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import unittest
+from unittest.mock import patch
 
 from agent_kit import tools
 from agent_kit.case_record import CaseRecord
@@ -14,7 +15,6 @@ from agent_kit.progress import branch, new_run
 from agent_kit.settings import verification_enabled
 from scripts import verify
 from tests import support
-
 
 ALL_INITIAL = list(support.INITIAL)
 READ_ALL = (
@@ -215,6 +215,18 @@ class ChecklistCheckTest(unittest.TestCase):
         (self.root / "ground_truth/case.json").unlink()
         result = self.verify(self.ctx, support.PARTIAL_CHECKLIST[1]["items"])
         self.assertEqual((True, None), (result["passed"], result["score"]))
+
+    def test_api_failure_fails_closed(self) -> None:
+        with patch.object(
+            self.ctx.client.responses,
+            "create",
+            side_effect=RuntimeError("temporary API failure"),
+        ):
+            result = self.verify(self.ctx, support.CHECKLIST_ITEMS)
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(0.0, result["score"])
+        self.assertIn("RuntimeError", result["feedback"])
 
 
 @SKIP
@@ -484,6 +496,38 @@ class VerifiedRunTest(unittest.TestCase):
         refused = self.tool_results(result["run_id"], "submit_memo")[-1]
         self.assertEqual("claims", refused["check"])
         self.assertNotEqual("awaiting_signoff", resumed["status"])
+
+    def test_agent_recovers_after_claims_feedback(self) -> None:
+        claims_checks = 0
+
+        def reject_once(text: str) -> list:
+            nonlocal claims_checks
+            claims_checks += 1
+            if claims_checks == 1:
+                return [
+                    {"item": "timing", "reason": "the quote gives no date"}
+                ]
+            return []
+
+        fake = support.scripted(
+            self.root,
+            self.initial() + AFTER_RELEASE + [GOOD_MEMO, GOOD_MEMO],
+            unsupported=reject_once,
+        )
+        result = self.run_agent(root=self.root, client=fake.client, turns=20)
+        support.release(self.root)
+        resumed = self.resume_run(
+            root=self.root, run_id=result["run_id"], client=fake.client, turns=10
+        )
+
+        self.assertEqual("awaiting_signoff", resumed["status"])
+        self.assertEqual(2, claims_checks)
+
+        case = support.case(self.root, result["run_id"])
+        self.assertEqual(
+            ["memo", "memo", "claims", "memo", "claims"],
+            [check["check"] for check in case["memo_checks"]],
+        )
 
     def test_three_refused_memos_escalate_to_a_person(self) -> None:
         fake = support.scripted(

@@ -408,6 +408,8 @@ class CaseRecord:
     def review_memo(
         self, approve: bool, notes: str = "", flag_decisions: dict | None = None
     ) -> dict:
+        if type(approve) is not bool:
+            raise CaseError("memo review decision must be a boolean")
         memo = self.data.get("memo")
         if not memo:
             raise CaseError("no memo has been filed")

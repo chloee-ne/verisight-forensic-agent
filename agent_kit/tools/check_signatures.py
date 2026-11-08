@@ -24,7 +24,7 @@ VERDICTS = ("consistent", "inconsistent", "unclear", "unsigned")
 DEFINITION = {
     "type": "function",
     "name": "check_signatures",
-    "description": "Multimodal forensic check using SAM 3.1 segmentation and Muse Spark vision: check whether the signature presented as the signer's on one page is consistent with a genuine reference signature of the same person on another page.",
+    "description": "Multimodal visual screening using SAM 3.1 segmentation and Muse Spark vision: compare a signature mark on one page with a supplied reference signature on another page. This checks visual consistency only; it does not establish signer identity, signature authenticity, or reference provenance.",
     "parameters": {
         "type": "object",
         "additionalProperties": False,
@@ -40,7 +40,7 @@ DEFINITION = {
             },
             "reference_document_id": {
                 "type": "string",
-                "description": "a document the signer genuinely signed",
+                "description": "a reference document/page supplied for visual comparison; its provenance and whether the signer actually signed it must be independently verified by a human",
             },
             "reference_page": {"type": "integer"},
         },
@@ -80,7 +80,9 @@ def data_url(image: Path) -> str:
     return "data:image/png;base64," + base64.b64encode(image.read_bytes()).decode()
 
 
-def segment(client: OpenAI, image: Path, prompt: str = SIGNATURE_PROMPT) -> list:
+def segment(
+    client: OpenAI, image: Path, prompt: str = SIGNATURE_PROMPT
+) -> list | None:
     try:
         response = client.responses.create(
             model=sam_model(),
@@ -96,7 +98,7 @@ def segment(client: OpenAI, image: Path, prompt: str = SIGNATURE_PROMPT) -> list
         )
         return parse_boxes(cast(Response, response).output_text)
     except Exception:
-        return []
+        return None
 
 
 def run(ctx: Context, args: dict) -> dict:
@@ -116,38 +118,45 @@ def run(ctx: Context, args: dict) -> dict:
     target_boxes = segment(ctx.client, target_img)
     ref_boxes = segment(ctx.client, ref_img)
 
-    prompt = (
-        f"You are performing a visual signature consistency check for signer '{signer}'.\n"
-        f"Image 1 is {document_id} page {page} (SAM 3.1 detected ink boxes: {json.dumps(target_boxes)}).\n"
-        f"Image 2 is the genuine reference {reference_id} page {reference_page} (SAM 3.1 detected ink boxes: {json.dumps(ref_boxes)}).\n"
-        "Compare the handwritten signature attributed to the signer on Image 1 against Image 2. "
-        "Check letter shapes, loops, slant, rhythm, or whether Image 1 is signed by someone else (e.g. 'pp' / per procurationem), stamped, or unsigned.\n"
-        "Respond ONLY with valid JSON: {\"verdict\": \"consistent\"|\"inconsistent\"|\"unclear\"|\"unsigned\", \"reason\": \"one concise sentence explaining what you see\"}"
-    )
-    try:
-        resp = ctx.client.responses.create(
-            model=model(),
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": prompt},
-                        {"type": "input_image", "image_url": data_url(target_img)},
-                        {"type": "input_image", "image_url": data_url(ref_img)},
-                    ],
-                }
-            ],
-        )
-        raw_text = cast(Response, resp).output_text.strip()
-        m = re.search(r"\{.*\}", raw_text, re.DOTALL)
-        parsed = json.loads(m.group(0)) if m else {}
-        verdict = str(parsed.get("verdict", "inconsistent")).lower()
-        if verdict not in VERDICTS:
-            verdict = "inconsistent"
-        reason = str(parsed.get("reason", raw_text[:200]))
-    except Exception as e:
+    if target_boxes is None or ref_boxes is None:
         verdict = "unclear"
-        reason = f"Multimodal check completed with warning: {e}"
+        reason = (
+            "SAM segmentation warning: unavailable; "
+            "visual comparison was skipped."
+        )
+    else:
+        prompt = (
+            f"You are performing a visual signature consistency check for signer '{signer}'.\n"
+            f"Image 1 is {document_id} page {page} (SAM 3.1 detected ink boxes: {json.dumps(target_boxes)}).\n"
+            f"Image 2 is the genuine reference {reference_id} page {reference_page} (SAM 3.1 detected ink boxes: {json.dumps(ref_boxes)}).\n"
+            "Compare the handwritten signature attributed to the signer on Image 1 against Image 2. "
+            "Check letter shapes, loops, slant, rhythm, or whether Image 1 is signed by someone else (e.g. 'pp' / per procurationem), stamped, or unsigned.\n"
+            'Respond ONLY with valid JSON: {"verdict": "consistent"|"inconsistent"|"unclear"|"unsigned", "reason": "one concise sentence explaining what you see"}'
+        )
+        try:
+            resp = ctx.client.responses.create(
+                model=model(),
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": prompt},
+                            {"type": "input_image", "image_url": data_url(target_img)},
+                            {"type": "input_image", "image_url": data_url(ref_img)},
+                        ],
+                    }
+                ],
+            )
+            raw_text = cast(Response, resp).output_text.strip()
+            m = re.search(r"\{.*\}", raw_text, re.DOTALL)
+            parsed = json.loads(m.group(0)) if m else {}
+            verdict = str(parsed.get("verdict", "unclear")).lower()
+            if verdict not in VERDICTS:
+                verdict = "unclear"
+            reason = str(parsed.get("reason", raw_text[:200]))
+        except Exception as e:
+            verdict = "unclear"
+            reason = f"Multimodal check completed with warning: {e}"
 
     ctx.case.add_signature_check(
         {
@@ -156,11 +165,11 @@ def run(ctx: Context, args: dict) -> dict:
             "signer": signer,
             "verdict": verdict,
             "reason": reason,
-            "boxes": target_boxes,
+            "boxes": target_boxes or [],
             "reference": {
                 "document_id": reference_id,
                 "page": reference_page,
-                "boxes": ref_boxes,
+                "boxes": ref_boxes or [],
             },
         }
     )
@@ -170,5 +179,5 @@ def run(ctx: Context, args: dict) -> dict:
         "signer": signer,
         "verdict": verdict,
         "reason": reason,
-        "sam_boxes_found": len(target_boxes),
+        "sam_boxes_found": len(target_boxes or []),
     }
