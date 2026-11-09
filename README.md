@@ -164,6 +164,25 @@ The script generates an HTML report:
 
 Open the generated file in a web browser to view the report.
 
+## Sample Forensic Report
+
+A sample HTML dossier from a saved investigation run is available here:
+
+**[View the VeriSight AI Forensic Report](docs/VeriSight_Forensic_Report.html)**
+
+The report documents one Project Keystone demonstration run
+(`run-20261106T204343Z-c71164`) and includes checklist coverage, signature
+screening results, the signature review log, financial exposure calculations,
+and evidence-request / memo status.
+
+**Interpretation notes:**
+- The reported 67% checklist coverage is specific to this saved run, not a guaranteed system-wide performance metric.
+- The $9,127,500 figure is claimed exposure and is explicitly **not verified**; the report distinguishes it from the $4,187,500 contractual cap.
+- The SAM-assisted signature result is **UNCLEAR** because usable signature regions were not returned. Visual screening does not establish identity or signature authenticity.
+- The memo was not submitted, and two evidence requests are recorded.
+
+This is an illustrative prototype output, not a certified forensic opinion or a legal conclusion. Findings require independent human review.
+
 ## Testing & Validation
 
 Run the tests from the `agent/` directory.
