@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 
-_SPACE = re.compile(r"\\s+")
+_SPACE = re.compile(r"\s+")
 _TRANSLATION = str.maketrans(
     {
         "\u2018": "'",
