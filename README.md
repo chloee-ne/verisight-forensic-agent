@@ -202,6 +202,12 @@ See [the benchmark guide](agent/benchmark/README.md) for its scope, input format
 metrics, and interpretation limits. Do not present its output as a forensic
 accuracy score.
 
+A separate experimental claim-support label-agreement evaluator is also
+available. It reports coverage, selective accuracy, per-class metrics, and a
+confusion matrix against explicitly supplied reference labels. Its bundled
+fixture is synthetic and is not a measurement of live model performance.
+See the benchmark guide for instructions and annotation requirements.
+
 ## Testing & Validation
 
 The following verification-enabled test suites were run locally on the `main` branch after the latest merge (November 15, 2026).
