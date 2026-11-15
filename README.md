@@ -183,6 +183,25 @@ and evidence-request / memo status.
 
 This is an illustrative prototype output, not a certified forensic opinion or a legal conclusion. Findings require independent human review.
 
+## Citation-Traceability Benchmark
+
+An offline, deterministic benchmark for citation traceability is available under
+`agent/benchmark/`. It checks whether citations reference an existing,
+non-privileged document page and whether the quoted text appears on that page.
+It includes synthetic fixtures and unit tests; it does not assess semantic
+support, source authenticity, or legal/forensic correctness.
+
+Run from `agent/`:
+
+```bash
+.venv/Scripts/python.exe -m benchmark.evaluate benchmark/sample_case.json
+.venv/Scripts/python.exe -m unittest tests.test_benchmark -v
+```
+
+See [the benchmark guide](agent/benchmark/README.md) for its scope, input format,
+metrics, and interpretation limits. Do not present its output as a forensic
+accuracy score.
+
 ## Testing & Validation
 
 The following verification-enabled test suites were run locally on the `main` branch after the latest merge (November 15, 2026).
