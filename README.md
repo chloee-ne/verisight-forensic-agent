@@ -185,28 +185,32 @@ This is an illustrative prototype output, not a certified forensic opinion or a 
 
 ## Testing & Validation
 
-Run the tests from the `agent/` directory.
+The following verification-enabled test suites were run locally on the `main` branch after the latest merge (November 15, 2026).
 
-### Standard Test Suite
+### Root Test Suite
 
-```bash
-./helper test
-```
-
-### Verification-Enabled Test Suite
+Run from the repository root:
 
 ```bash
-./helper test --verification
+VERIFICATION=on agent/.venv/Scripts/python.exe -m unittest discover -s tests -v
 ```
 
-Latest local test results (November 7, 2026):
+### Agent Test Suite
 
-| Configuration | Total Tests | Passed | Skipped |
-|---|---:|---:|---:|
-| Standard | 77 | 45 | 32 |
-| Verification enabled | 77 | 66 | 11 |
+Run from the `agent/` directory:
 
-Both configurations completed successfully with no failed tests.
+```bash
+VERIFICATION=on .venv/Scripts/python.exe -m unittest discover -s tests -v
+```
+
+### Latest Test Results
+
+| Test Suite | Total Tests | Passed (non-skipped) | Skipped | Failed |
+|---|---:|---:|---:|---:|
+| Root suite | 75 | 64 | 11 | 0 |
+| Agent suite | 89 | 78 | 11 | 0 |
+
+Both suites completed successfully with `OK`. The skipped tests are intentionally covered by the verification-enabled test modules; the two suite totals are separate and should not be added together as a count of unique tests.
 
 These results demonstrate automated software behavior, not independent validation of forensic accuracy or legal conclusions. Tests using mocked or offline components do not establish the reliability of live model outputs.
 
