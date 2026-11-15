@@ -124,7 +124,7 @@ class ScriptedModel:
                 "output_text": json.dumps({"unsupported": self.unsupported(text)}),
                 "usage": {"input_tokens": 1800, "output_tokens": 60},
             }
-        if "You are performing a visual signature consistency check" in text:
+        if "You are performing a visual signature consistency screening" in text:
             return {
                 "output_text": json.dumps({
                     "verdict": self.signature_verdict,

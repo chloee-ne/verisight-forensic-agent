@@ -50,6 +50,51 @@ class KitTest(unittest.TestCase):
             self.client, self.root, run_id or self.run_id, call(name, args)
         )
 
+    # ---- memo escalation -------------------------------------------------------------
+    def test_escalation_item_identifies_one_explicit_checklist_item(self) -> None:
+        from agent_kit.tools.submit_memo import _escalation_item
+
+        checklist = {
+            "readiness": {"status": "open"},
+            "damages": {"status": "open"},
+        }
+        self.assertEqual(
+            "readiness",
+            _escalation_item(checklist, ["Evidence for readiness is insufficient."]),
+        )
+
+    def test_escalation_item_does_not_guess_between_multiple_items(self) -> None:
+        from agent_kit.tools.submit_memo import _escalation_item
+
+        checklist = {
+            "readiness": {"status": "open"},
+            "damages": {"status": "open"},
+        }
+        self.assertIsNone(
+            _escalation_item(
+                checklist,
+                ["readiness and damages both need more evidence."],
+            )
+        )
+
+    def test_escalation_item_does_not_guess_for_generic_error_even_with_one_open_item(self) -> None:
+        from agent_kit.tools.submit_memo import _escalation_item
+
+        checklist = {
+            "readiness": {"status": "proven"},
+            "damages": {"status": "open"},
+        }
+        self.assertIsNone(_escalation_item(checklist, ["Generic refusal."]))
+
+    def test_escalation_item_does_not_guess_for_generic_error_with_multiple_open_items(self) -> None:
+        from agent_kit.tools.submit_memo import _escalation_item
+
+        checklist = {
+            "readiness": {"status": "open"},
+            "damages": {"status": "open"},
+        }
+        self.assertIsNone(_escalation_item(checklist, ["Generic refusal."]))
+
     # ---- document text and reading --------------------------------------------------
     def test_inbox_lists_only_released_documents(self) -> None:
         ids = [d["id"] for d in document_text.list_documents(self.root)]
@@ -286,20 +331,35 @@ class KitTest(unittest.TestCase):
         )
 
         other = dict(args, reference_document_id="DOC-MEMO", reference_page=1)
+        boxes = [{
+            "ordinal": 1,
+            "x1": 10,
+            "y1": 20,
+            "x2": 100,
+            "y2": 50,
+            "width": 90,
+            "height": 30,
+        }]
         response = mock.Mock()
         response.output_text = json.dumps({
             "verdict": "consistent",
             "reason": "The visible signature features appear similar.",
         })
         with mock.patch.object(
-            self.client.responses, "create", return_value=response
-        ):
-            result = self.tool("check_signatures", other, run_id)
+            check_signatures, "segment", return_value=boxes
+        ) as segment:
+            with mock.patch.object(
+                self.client.responses, "create", return_value=response
+            ) as create:
+                result = self.tool("check_signatures", other, run_id)
 
         self.assertEqual("consistent", result["verdict"])
+        self.assertEqual(2, segment.call_count)
+        create.assert_called_once()
         check = CaseRecord(self.root, run_id).data["signature_checks"][0]
         self.assertEqual(
-            {"document_id": "DOC-MEMO", "page": 1, "boxes": []}, check["reference"]
+            {"document_id": "DOC-MEMO", "page": 1, "boxes": boxes},
+            check["reference"],
         )
     def test_invalid_signature_verdict_defaults_to_unclear(self) -> None:
         run_id = new_run(
@@ -350,8 +410,53 @@ class KitTest(unittest.TestCase):
             result = self.tool("check_signatures", args, run_id)
 
         self.assertEqual("unclear", result["verdict"])
-        self.assertIn("warning", result["reason"].lower())
-        self.assertEqual(2, create.call_count)  # Two SAM attempts; no Muse call.
+        self.assertIn("SAM", result["reason"])
+        self.assertEqual(2, create.call_count)  # Two SAM attempts; no Muse call.  # Two SAM attempts; no Muse call.
+
+    def test_empty_sam_regions_default_to_unclear(self) -> None:
+        run_id = new_run(
+            self.root, instructions="i", objective="o", verification=True
+        )
+        args = {
+            "document_id": "DOC-REF",
+            "page": 1,
+            "signer": "Dana Okafor",
+            "reference_document_id": "DOC-MEMO",
+            "reference_page": 1,
+        }
+
+        response = mock.Mock()
+        response.output_text = json.dumps({
+            "verdict": "unclear",
+            "reason": "The original images do not show clearly comparable signatures.",
+        })
+
+        with mock.patch.object(
+            check_signatures,
+            "segment",
+            return_value=[],
+        ) as segment:
+            with mock.patch.object(
+                self.client.responses,
+                "create",
+                return_value=response,
+            ) as create:
+                result = self.tool("check_signatures", args, run_id)
+
+        self.assertEqual("unclear", result["verdict"])
+        self.assertIn("original images", result["reason"])
+        self.assertEqual(2, segment.call_count)
+        create.assert_called_once()
+
+        content = create.call_args.kwargs["input"][0]["content"]
+        image_inputs = [
+            item for item in content if item["type"] == "input_image"
+        ]
+        self.assertEqual(2, len(image_inputs))
+
+        checks = CaseRecord(self.root, run_id).data["signature_checks"]
+        self.assertEqual(1, len(checks))
+        self.assertEqual("unclear", checks[0]["verdict"])
     # ---- pre-built checks ------------------------------------------------------------
     def ctx(self) -> tools.Context:
         return tools.Context(
@@ -375,6 +480,24 @@ class KitTest(unittest.TestCase):
 
                 self.assertEqual(original, case.data["memo"])
                 self.assertEqual(event_count, len(case.data["audit"]))
+
+    def test_skipped_memo_check_is_audited_without_counting_as_refusal(self) -> None:
+        case = self.case()
+        record = case.record_memo_check("claims", [], skipped=True)
+
+        self.assertTrue(record["passed"])
+        self.assertEqual("skipped", record["status"])
+        self.assertEqual(0, case.memo_refusals())
+        self.assertEqual("skipped", case.data["memo_checks"][-1]["status"])
+
+    def test_verify_claims_marks_no_eligible_findings_as_skipped(self) -> None:
+        from verification import verify_claims
+
+        memo = {"findings": [{"item": "x", "status": "escalated", "summary": "Needs review.", "citations": []}]}
+        result = verify_claims.run_verification(self.ctx(), memo)
+        self.assertTrue(result["passed"])
+        self.assertTrue(result["skipped"])
+        self.assertEqual([], result["feedback"])
 
     def test_verify_claims_reports_unsupported_findings(self) -> None:
         from verification import verify_claims

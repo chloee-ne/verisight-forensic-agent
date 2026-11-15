@@ -534,11 +534,11 @@ class VerifiedRunTest(unittest.TestCase):
             self.root, [support.CHECKLIST, READ_ALL, EARLY_MEMO, EARLY_MEMO, EARLY_MEMO]
         )
         result = self.run_agent(root=self.root, client=fake.client, turns=10)
-        self.assertEqual(("needs_input", 5), (result["status"], result["turn"]))
-        self.assertEqual(
-            "memo_refused",
-            support.case(self.root, result["run_id"])["requests"][0]["rule"],
-        )
+        self.assertEqual(("paused", 10), (result["status"], result["turn"]))
+        case = support.case(self.root, result["run_id"])
+        self.assertEqual([], case["requests"])
+        refusal = self.tool_results(result["run_id"], "submit_memo")[-1]
+        self.assertIn("no single checklist item", refusal["error"])
 
     def test_a_flagged_document_cannot_be_read_again(self) -> None:
         reread = ("analyze_document", {"document_ids": ["DOC-MEMO"], "request": "x"})
