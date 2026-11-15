@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "scope": "claim_support_label_agreement",
+  "annotation_status": "synthetic_demo",
+  "description": "Illustrative synthetic labels only; not real VeriSight model outputs or independent legal annotations.",
+  "label_definitions": {
+    "supports": "The cited evidence supports the claim as written.",
+    "contradicts": "The cited evidence conflicts with the claim as written.",
+    "insufficient_evidence": "The available cited evidence is insufficient to decide."
+  },
+  "examples": [
+    {"id": "synthetic-01", "reference_label": "supports", "system_label": "supports"},
+    {"id": "synthetic-02", "reference_label": "supports", "system_label": "insufficient_evidence"},
+    {"id": "synthetic-03", "reference_label": "contradicts", "system_label": "contradicts"},
+    {"id": "synthetic-04", "reference_label": "contradicts", "system_label": "supports"},
+    {"id": "synthetic-05", "reference_label": "insufficient_evidence", "system_label": "insufficient_evidence"},
+    {"id": "synthetic-06", "reference_label": "insufficient_evidence", "system_label": "abstain"}
+  ]
+}
