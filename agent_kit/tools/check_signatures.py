@@ -118,24 +118,48 @@ def run(ctx: Context, args: dict) -> dict:
     target_boxes = segment(ctx.client, target_img)
     ref_boxes = segment(ctx.client, ref_img)
 
-    if not target_boxes or not ref_boxes:
+    if target_boxes is None or ref_boxes is None:
+        failed_pages = []
+        if target_boxes is None:
+            failed_pages.append(f"{document_id} page {page}")
+        if ref_boxes is None:
+            failed_pages.append(f"{reference_id} page {reference_page}")
+
         verdict = "unclear"
         reason = (
-            "SAM did not return usable signature regions for both images; "
-            "visual comparison was skipped and the result is unclear."
+            "SAM segmentation failed for "
+            + ", ".join(failed_pages)
+            + "; visual comparison was skipped."
         )
     else:
         prompt = (
-            f"You are performing a visual signature consistency screening for a mark attributed to '{signer}'.\n"
-            f"Image 1 is {document_id} page {page} (SAM 3.1 detected ink boxes: {json.dumps(target_boxes)}).\n"
-            f"Image 2 is a supplied reference sample {reference_id} page {reference_page}; its provenance and signer attribution have NOT been independently verified (SAM 3.1 detected ink boxes: {json.dumps(ref_boxes)}).\n"
-            "Compare only visible handwriting and stroke characteristics between Image 1 and the supplied sample in Image 2. "
-            "Consider letter shapes, loops, slant, and rhythm. Do NOT infer signer identity, authorship, or authenticity from visual similarity. "
-            "A consistent result means visual similarity only, not proof that the same person signed either document. "
-            "If either image lacks a clearly usable handwritten signature or the comparison is inconclusive, return unclear. "
-            "If Image 1 is visibly unsigned, return unsigned; also identify apparent stamps or signing on behalf of another person (e.g. pp / per procurationem) in the reason.\n"
-            'Respond ONLY with valid JSON: {"verdict": "consistent"|"inconsistent"|"unclear"|"unsigned", "reason": "one concise sentence explaining what you see"}'
+            f"You are performing a visual signature consistency screening "
+            f"for a mark attributed to '{signer}'.\n"
+            f"Image 1 is {document_id} page {page} "
+            f"(SAM 3.1 detected ink boxes: {json.dumps(target_boxes)}).\n"
+            f"Image 2 is a supplied reference sample {reference_id} "
+            f"page {reference_page}; its provenance and signer attribution "
+            f"have NOT been independently verified "
+            f"(SAM 3.1 detected ink boxes: {json.dumps(ref_boxes)}).\n"
+            "Compare only visible handwriting and stroke characteristics "
+            "between Image 1 and Image 2. "
+            "Consider letter shapes, loops, slant, and rhythm. "
+            "Do NOT infer signer identity, authorship, or authenticity "
+            "from visual similarity. "
+            "A consistent result means visual similarity only, not proof "
+            "that the same person signed either document. "
+            "If Image 1 is visibly unsigned, return unsigned. "
+            "If either image lacks a clearly usable handwritten signature "
+            "or the comparison is inconclusive, return unclear. "
+            "Identify apparent stamps or signing on behalf of another "
+            "person (e.g. pp / per procurationem) in the reason. "
+            "Do not treat a missing SAM region as proof that a signature "
+            "is absent; inspect the original images.\n"
+            'Respond ONLY with valid JSON: '
+            '{"verdict":"consistent"|"inconsistent"|"unclear"|"unsigned",'
+            '"reason":"one concise sentence explaining what you see"}'
         )
+
         try:
             resp = ctx.client.responses.create(
                 model=model(),
@@ -144,22 +168,51 @@ def run(ctx: Context, args: dict) -> dict:
                         "role": "user",
                         "content": [
                             {"type": "input_text", "text": prompt},
-                            {"type": "input_image", "image_url": data_url(target_img)},
-                            {"type": "input_image", "image_url": data_url(ref_img)},
+                            {
+                                "type": "input_image",
+                                "image_url": data_url(target_img),
+                            },
+                            {
+                                "type": "input_image",
+                                "image_url": data_url(ref_img),
+                            },
                         ],
                     }
                 ],
             )
-            raw_text = cast(Response, resp).output_text.strip()
+
+            raw_text = cast(Response, resp).output_text
+            if not isinstance(raw_text, str) or not raw_text.strip():
+                raise ValueError("Muse Spark returned empty output")
+
             m = re.search(r"\{.*\}", raw_text, re.DOTALL)
-            parsed = json.loads(m.group(0)) if m else {}
-            verdict = str(parsed.get("verdict", "unclear")).lower()
-            if verdict not in VERDICTS:
-                verdict = "unclear"
-            reason = str(parsed.get("reason", raw_text[:200]))
+            if not m:
+                raise ValueError("Muse Spark returned invalid JSON")
+
+            parsed = json.loads(m.group(0))
+            if not isinstance(parsed, dict):
+                raise ValueError("Muse Spark response must be a JSON object")
+
+            candidate = parsed.get("verdict")
+            candidate_reason = parsed.get("reason")
+
+            if (
+                not isinstance(candidate, str)
+                or candidate.lower() not in VERDICTS
+                or not isinstance(candidate_reason, str)
+                or not candidate_reason.strip()
+            ):
+                raise ValueError("Muse Spark response has invalid fields")
+
+            verdict = candidate.lower()
+            reason = candidate_reason.strip()[:500]
+
         except Exception as e:
             verdict = "unclear"
-            reason = f"Multimodal check completed with warning: {e}"
+            reason = (
+                f"Multimodal check completed with warning: "
+                f"{type(e).__name__}: {e}"
+            )
 
     ctx.case.add_signature_check(
         {
