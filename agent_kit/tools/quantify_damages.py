@@ -1,4 +1,4 @@
-"""quantify_damages: Calculate contractual liability cap vs uncapped fraud/gross-negligence exposure."""
+"""quantify_damages: Calculate claimed liability cap vs uncapped exposure; does not verify evidence or legal entitlement."""
 
 from __future__ import annotations
 import json
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 DEFINITION = {
     "type": "function",
     "name": "quantify_damages",
-    "description": "Calculate and verify contractual liability cap exposure vs. uncapped fraud/gross-negligence damages delta grounded in case documents.",
+    "description": "Calculate the arithmetic difference and multiplier between a supplied contractual liability cap and a supplied uncapped damages claim. This tool does not verify source documents, evidence, legal entitlement, or whether the liability cap can be lifted.",
     "parameters": {
         "type": "object",
         "additionalProperties": False,

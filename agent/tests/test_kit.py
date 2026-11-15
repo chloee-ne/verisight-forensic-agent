@@ -277,19 +277,44 @@ class KitTest(unittest.TestCase):
             ("not implemented yet", "paused"), (result["error"], result["status"])
         )
 
-    def test_check_signatures_is_a_placeholder_that_names_its_reference(self) -> None:
+    def test_check_signatures_compares_a_distinct_reference_page(self) -> None:
         run_id = new_run(self.root, instructions="i", objective="o", verification=True)
         args = {"document_id": "DOC-REF", "page": 1, "signer": "Dana Okafor"}
         same = dict(args, reference_document_id="DOC-REF", reference_page=1)
         self.assertIn(
             "different page", self.tool("check_signatures", same, run_id)["error"]
         )
+
         other = dict(args, reference_document_id="DOC-MEMO", reference_page=1)
-        result = self.tool("check_signatures", other, run_id)
+        boxes = [{
+            "ordinal": 1,
+            "x1": 10,
+            "y1": 20,
+            "x2": 100,
+            "y2": 50,
+            "width": 90,
+            "height": 30,
+        }]
+        response = mock.Mock()
+        response.output_text = json.dumps({
+            "verdict": "consistent",
+            "reason": "The visible signature features appear similar.",
+        })
+        with mock.patch.object(
+            check_signatures, "segment", return_value=boxes
+        ) as segment:
+            with mock.patch.object(
+                self.client.responses, "create", return_value=response
+            ) as create:
+                result = self.tool("check_signatures", other, run_id)
+
         self.assertEqual("consistent", result["verdict"])
+        self.assertEqual(2, segment.call_count)
+        create.assert_called_once()
         check = CaseRecord(self.root, run_id).data["signature_checks"][0]
         self.assertEqual(
-            {"document_id": "DOC-MEMO", "page": 1, "boxes": []}, check["reference"]
+            {"document_id": "DOC-MEMO", "page": 1, "boxes": boxes},
+            check["reference"],
         )
     def test_invalid_signature_verdict_defaults_to_unclear(self) -> None:
         run_id = new_run(
@@ -336,11 +361,44 @@ class KitTest(unittest.TestCase):
             self.client.responses,
             "create",
             side_effect=RuntimeError("API unavailable"),
-        ):
+        ) as create:
             result = self.tool("check_signatures", args, run_id)
 
         self.assertEqual("unclear", result["verdict"])
-        self.assertIn("warning", result["reason"].lower())
+        self.assertIn("SAM", result["reason"])
+        self.assertEqual(2, create.call_count)  # Two SAM attempts; no Muse call.  # Two SAM attempts; no Muse call.
+
+    def test_empty_sam_regions_default_to_unclear(self) -> None:
+        run_id = new_run(
+            self.root, instructions="i", objective="o", verification=True
+        )
+        args = {
+            "document_id": "DOC-REF",
+            "page": 1,
+            "signer": "Dana Okafor",
+            "reference_document_id": "DOC-MEMO",
+            "reference_page": 1,
+        }
+
+        with mock.patch.object(
+            check_signatures,
+            "segment",
+            return_value=[],
+        ) as segment:
+            with mock.patch.object(
+                self.client.responses,
+                "create",
+            ) as create:
+                result = self.tool("check_signatures", args, run_id)
+
+        self.assertEqual("unclear", result["verdict"])
+        self.assertIn("SAM", result["reason"])
+        self.assertEqual(2, segment.call_count)
+        create.assert_not_called()
+
+        checks = CaseRecord(self.root, run_id).data["signature_checks"]
+        self.assertEqual(1, len(checks))
+        self.assertEqual("unclear", checks[0]["verdict"])
     # ---- pre-built checks ------------------------------------------------------------
     def ctx(self) -> tools.Context:
         return tools.Context(
@@ -350,6 +408,20 @@ class KitTest(unittest.TestCase):
             CaseRecord(self.root, self.run_id),
             True,
         )
+
+    def test_review_memo_rejects_non_boolean_decisions_without_mutation(self) -> None:
+        case = self.case()
+        case.file_memo({"findings": []}, "awaiting_signoff")
+        original = json.loads(json.dumps(case.data["memo"]))
+        event_count = len(case.data["audit"])
+
+        for invalid in ("false", 1, None):
+            with self.subTest(approve=invalid):
+                with self.assertRaises(CaseError):
+                    case.review_memo(invalid)
+
+                self.assertEqual(original, case.data["memo"])
+                self.assertEqual(event_count, len(case.data["audit"]))
 
     def test_verify_claims_reports_unsupported_findings(self) -> None:
         from verification import verify_claims

@@ -200,7 +200,13 @@ def scripted(root: Path, actions: list, unsupported=None) -> Scripted:
         return queue.pop(0) if queue else None
 
     return Scripted(
-        ScriptedModel(transcripts(), planner, sam_outputs, unsupported=unsupported)
+        ScriptedModel(
+            transcripts(),
+            planner,
+            sam_outputs,
+            unsupported=unsupported,
+            signature_verdict="consistent",
+        )
     )
 
 

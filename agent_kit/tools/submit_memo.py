@@ -10,6 +10,7 @@ for attorney sign-off (awaiting_signoff).
 from __future__ import annotations
 
 import importlib
+import re
 from typing import TYPE_CHECKING
 
 from .request_evidence import escalate
@@ -18,6 +19,26 @@ if TYPE_CHECKING:
     from . import Context
 
 MAX_REFUSALS = 3
+
+
+def _escalation_item(checklist: dict, problems: list[str]) -> str | None:
+    """Identify one checklist item clearly implicated by all memo errors.
+
+    Escalate only when the complete set of problems identifies exactly one
+    checklist item. Never ignore other implicated items or guess from the
+    number of items that remain open.
+    """
+    implicated = set()
+
+    for problem in problems:
+        for item in checklist:
+            if re.search(
+                rf"(?<![A-Za-z0-9_]){re.escape(item)}(?![A-Za-z0-9_])",
+                problem,
+            ):
+                implicated.add(item)
+
+    return next(iter(implicated)) if len(implicated) == 1 else None
 
 ITEM = {
     "type": "string",
@@ -86,14 +107,18 @@ def run(ctx: Context, args: dict) -> dict:
         if result.get("passed")
         else [str(p) for p in result.get("feedback") or ["refused"]]
     )
-    ctx.case.record_memo_check(check, problems)
+    ctx.case.record_memo_check(check, problems, skipped=bool(result.get("skipped")))
     if problems:
         if ctx.case.memo_refusals() >= MAX_REFUSALS:
             checklist = ctx.case.data["checklist"]
-            item = next(
-                (k for k, v in checklist.items() if v["status"] == "open"),
-                next(iter(checklist), ""),
-            )
+            item = _escalation_item(checklist, problems)
+            if item is None:
+                return {
+                    "error": "memo refused; no single checklist item "
+                    "could be identified for escalation",
+                    "check": check,
+                    "problems": problems,
+                }
             need = (
                 f"The memo was refused {ctx.case.memo_refusals()} times. Last problems: "
                 + "; ".join(problems)

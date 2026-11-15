@@ -42,7 +42,7 @@ def run_verification(ctx, memo: dict) -> dict:
     ]
 
     if not findings:
-        return {"passed": True, "feedback": []}
+        return {"passed": True, "skipped": True, "feedback": []}
 
     try:
         response = ctx.client.responses.create(

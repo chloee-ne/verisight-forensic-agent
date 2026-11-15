@@ -22,41 +22,23 @@ MAX_REFUSALS = 3
 
 
 def _escalation_item(checklist: dict, problems: list[str]) -> str | None:
-    """Identify one checklist item clearly implicated by memo errors."""
+    """Identify one checklist item clearly implicated by all memo errors.
+
+    Escalate only when the complete set of problems identifies exactly one
+    checklist item. Never ignore other implicated items or guess from the
+    number of items that remain open.
+    """
     implicated = set()
 
     for problem in problems:
-        mentions = [
-            item
-            for item in checklist
+        for item in checklist:
             if re.search(
                 rf"(?<![A-Za-z0-9_]){re.escape(item)}(?![A-Za-z0-9_])",
                 problem,
-            )
-        ]
-        if len(mentions) == 1:
-            implicated.add(mentions[0])
+            ):
+                implicated.add(item)
 
-    if len(implicated) == 1:
-        return next(iter(implicated))
-
-    if len(implicated) > 1:
-        open_items = [
-            item
-            for item in checklist
-            if item in implicated
-            and checklist[item].get("status") == "open"
-        ]
-        return open_items[0] if len(open_items) == 1 else None
-
-    # A generic error can identify an item only when there is exactly
-    # one unresolved checklist item. Never fall back to the first item.
-    open_items = [
-        item
-        for item, entry in checklist.items()
-        if entry.get("status") == "open"
-    ]
-    return open_items[0] if len(open_items) == 1 else None
+    return next(iter(implicated)) if len(implicated) == 1 else None
 
 
 ITEM = {
@@ -126,7 +108,7 @@ def run(ctx: Context, args: dict) -> dict:
         if result.get("passed")
         else [str(p) for p in result.get("feedback") or ["refused"]]
     )
-    ctx.case.record_memo_check(check, problems)
+    ctx.case.record_memo_check(check, problems, skipped=bool(result.get("skipped")))
     if problems:
         if ctx.case.memo_refusals() >= MAX_REFUSALS:
             checklist = ctx.case.data["checklist"]

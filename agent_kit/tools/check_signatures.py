@@ -110,7 +110,7 @@ def run(ctx: Context, args: dict) -> dict:
     signer = str(args.get("signer", ""))
     if (reference_id, reference_page) == (document_id, page):
         return {
-            "error": "the reference must be a different page, one the signer genuinely signed"
+            "error": "the reference must be a different page; its provenance and signer attribution must be independently verified by a human"
         }
     target_img = document_text.page_image(ctx.root, document_id, page)
     ref_img = document_text.page_image(ctx.root, reference_id, reference_page)
@@ -118,19 +118,22 @@ def run(ctx: Context, args: dict) -> dict:
     target_boxes = segment(ctx.client, target_img)
     ref_boxes = segment(ctx.client, ref_img)
 
-    if target_boxes is None or ref_boxes is None:
+    if not target_boxes or not ref_boxes:
         verdict = "unclear"
         reason = (
-            "SAM segmentation warning: unavailable; "
-            "visual comparison was skipped."
+            "SAM did not return usable signature regions for both images; "
+            "visual comparison was skipped and the result is unclear."
         )
     else:
         prompt = (
-            f"You are performing a visual signature consistency check for signer '{signer}'.\n"
+            f"You are performing a visual signature consistency screening for a mark attributed to '{signer}'.\n"
             f"Image 1 is {document_id} page {page} (SAM 3.1 detected ink boxes: {json.dumps(target_boxes)}).\n"
-            f"Image 2 is the genuine reference {reference_id} page {reference_page} (SAM 3.1 detected ink boxes: {json.dumps(ref_boxes)}).\n"
-            "Compare the handwritten signature attributed to the signer on Image 1 against Image 2. "
-            "Check letter shapes, loops, slant, rhythm, or whether Image 1 is signed by someone else (e.g. 'pp' / per procurationem), stamped, or unsigned.\n"
+            f"Image 2 is a supplied reference sample {reference_id} page {reference_page}; its provenance and signer attribution have NOT been independently verified (SAM 3.1 detected ink boxes: {json.dumps(ref_boxes)}).\n"
+            "Compare only visible handwriting and stroke characteristics between Image 1 and the supplied sample in Image 2. "
+            "Consider letter shapes, loops, slant, and rhythm. Do NOT infer signer identity, authorship, or authenticity from visual similarity. "
+            "A consistent result means visual similarity only, not proof that the same person signed either document. "
+            "If either image lacks a clearly usable handwritten signature or the comparison is inconclusive, return unclear. "
+            "If Image 1 is visibly unsigned, return unsigned; also identify apparent stamps or signing on behalf of another person (e.g. pp / per procurationem) in the reason.\n"
             'Respond ONLY with valid JSON: {"verdict": "consistent"|"inconsistent"|"unclear"|"unsigned", "reason": "one concise sentence explaining what you see"}'
         )
         try:

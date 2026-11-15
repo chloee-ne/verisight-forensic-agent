@@ -161,17 +161,22 @@ class CaseRecord:
         )
         return record
 
-    def record_memo_check(self, check: str, problems: list) -> dict:
-        """Store the outcome of a memo check (memo rules or claims) for one submitted memo."""
+    def record_memo_check(
+        self, check: str, problems: list, skipped: bool = False
+    ) -> dict:
+        """Store a memo check outcome, distinguishing skipped checks from passes."""
         record = {
             "check": check,
             "passed": not problems,
+            "status": "failed" if problems else "skipped" if skipped else "passed",
             "problems": problems,
             "at": now(),
         }
         self.data.setdefault("memo_checks", []).append(record)
         self._save(
-            "memo_checked", "verification", {"check": check, "passed": not problems}
+            "memo_checked",
+            "verification",
+            {"check": check, "passed": not problems, "status": record["status"]},
         )
         return record
 

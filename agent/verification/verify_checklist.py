@@ -14,10 +14,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import cast
 
 from agent_kit.settings import case_dir, model
-from openai.types.responses import Response
 
 # ---- pre-built: the ground truth (don't change) ----------------------------------------
 # It lives outside this folder (GROUND_TRUTH_DIR, default ../ground_truth), one
@@ -59,31 +57,82 @@ def run_verification(ctx, items: list) -> dict:
     reference = load_reference(ctx.root)
     if reference is None:
         return {"passed": True, "score": None, "feedback": ""}
+
     prompt = PROMPT.format(
         reference=json.dumps(
-            [{"id": r["id"], "question": r["question"]} for r in reference], indent=1
+            [{"id": r["id"], "question": r["question"]} for r in reference],
+            indent=1,
         ),
         agent=json.dumps(
             [{"id": i.get("id"), "question": i.get("question")} for i in items],
             indent=1,
         ),
     )
-    response = cast(
-        Response,
-        ctx.client.responses.create(
-            model=model(), input=prompt, text={"format": {"type": "json_object"}}
-        ),
-    )
+
     try:
-        answer = json.loads(response.output_text)
-        marks, feedback = answer.get("covered") or {}, str(answer.get("feedback") or "")
-    except (ValueError, AttributeError):
-        marks, feedback = {}, ""
-    covered = sum(1 for r in reference if marks.get(r["id"]) is True)
-    score = covered / len(reference) if reference else 1.0
+        response = ctx.client.responses.create(
+            model=model(), input=prompt, text={"format": {"type": "json_object"}}
+        )
+    except Exception as exc:
+        return {
+            "passed": False,
+            "score": 0.0,
+            "feedback": (
+                "Checklist verification could not be completed because the model API "
+                f"failed: {type(exc).__name__}: {exc}"
+            ),
+        }
+
+    output = getattr(response, "output_text", None)
+    if not isinstance(output, str) or not output.strip():
+        return {
+            "passed": False,
+            "score": 0.0,
+            "feedback": "Checklist verification failed: the model returned no valid JSON response.",
+        }
+
+    try:
+        answer = json.loads(output)
+    except (ValueError, TypeError):
+        return {
+            "passed": False,
+            "score": 0.0,
+            "feedback": "Checklist verification failed: the model returned malformed JSON.",
+        }
+
+    if not isinstance(answer, dict):
+        return {
+            "passed": False,
+            "score": 0.0,
+            "feedback": "Checklist verification failed: the response must be a JSON object.",
+        }
+
+    marks = answer.get("covered")
+    feedback = answer.get("feedback")
+    expected_ids = {r["id"] for r in reference}
+
+    if (
+        not isinstance(marks, dict)
+        or set(marks) != expected_ids
+        or any(not isinstance(value, bool) for value in marks.values())
+        or not isinstance(feedback, str)
+    ):
+        return {
+            "passed": False,
+            "score": 0.0,
+            "feedback": (
+                "Checklist verification failed: the model response did not contain "
+                "a complete, valid coverage assessment."
+            ),
+        }
+
+    covered = sum(1 for item_id in expected_ids if marks[item_id] is True)
+    score = covered / len(expected_ids) if expected_ids else 1.0
     passed = score >= 1.0
+
     if not passed and not feedback:
         feedback = "The checklist does not yet cover everything the question turns on."
+
     return {
         "passed": passed,
         "score": round(score, 2),
