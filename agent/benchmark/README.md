@@ -61,3 +61,32 @@ A high score means only that the tested citations are traceable under this
 fixture's deterministic rules. It is not a forensic accuracy score and must not
 be presented as one. Expand the fixture set and obtain independent human
 annotations before making broader performance claims.
+
+
+## Claim-support label-agreement evaluator (experimental)
+
+A separate evaluator, `benchmark.evaluate_claim_support`, computes agreement
+between a system's exported claim-support label and a reference annotation. It
+supports three reference labels: `supports`, `contradicts`, and
+`insufficient_evidence`; the system may also return `abstain`.
+
+Run from `agent/`:
+
+```bash
+.venv/Scripts/python.exe -m benchmark.evaluate_claim_support benchmark/claim_support_sample.json
+.venv/Scripts/python.exe -m unittest tests.test_claim_support_benchmark -v
+```
+
+Reported metrics include coverage, accuracy (with abstentions counted as
+incorrect), selective accuracy on answered examples, per-class precision/recall/F1,
+and a confusion matrix. The sample is explicitly marked `synthetic_demo`: its
+labels are illustrative, not actual VeriSight model outputs or independent
+human adjudications. For a real evaluation, export the system's actual labels
+and have qualified reviewers independently adjudicate the reference labels
+using a written annotation protocol. Keep disagreements and ambiguous cases
+visible; do not silently convert them into a forced label.
+
+This measures **label agreement only**. It does not establish that the reference
+labels are correct, that a cited source is authentic, or that a legal/factual
+claim is true. Do not combine this score with citation traceability into a
+single "forensic accuracy" number.
