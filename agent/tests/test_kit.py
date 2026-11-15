@@ -380,6 +380,12 @@ class KitTest(unittest.TestCase):
             "reference_page": 1,
         }
 
+        response = mock.Mock()
+        response.output_text = json.dumps({
+            "verdict": "unclear",
+            "reason": "The original images do not show clearly comparable signatures.",
+        })
+
         with mock.patch.object(
             check_signatures,
             "segment",
@@ -388,13 +394,20 @@ class KitTest(unittest.TestCase):
             with mock.patch.object(
                 self.client.responses,
                 "create",
+                return_value=response,
             ) as create:
                 result = self.tool("check_signatures", args, run_id)
 
         self.assertEqual("unclear", result["verdict"])
-        self.assertIn("SAM", result["reason"])
+        self.assertIn("original images", result["reason"])
         self.assertEqual(2, segment.call_count)
-        create.assert_not_called()
+        create.assert_called_once()
+
+        content = create.call_args.kwargs["input"][0]["content"]
+        image_inputs = [
+            item for item in content if item["type"] == "input_image"
+        ]
+        self.assertEqual(2, len(image_inputs))
 
         checks = CaseRecord(self.root, run_id).data["signature_checks"]
         self.assertEqual(1, len(checks))
