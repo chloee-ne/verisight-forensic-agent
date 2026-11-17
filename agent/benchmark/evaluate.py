@@ -34,6 +34,16 @@ def normalize(value: str) -> str:
     return _SPACE.sub(" ", value.translate(_TRANSLATION)).strip().lower()
 
 
+def _contains_normalized_quote(page: str, quote: str) -> bool:
+    """Match a normalized quote without accepting a partial word match."""
+    normalized_page = normalize(page)
+    normalized_quote = normalize(quote)
+    if not normalized_quote:
+        return False
+    pattern = rf"(?<!\\w){re.escape(normalized_quote)}(?!\\w)"
+    return re.search(pattern, normalized_page) is not None
+
+
 def _validate_case(case: dict[str, Any]) -> None:
     if not isinstance(case, dict):
         raise ValueError("benchmark case must be a JSON object")
@@ -92,7 +102,7 @@ def evaluate_case(case: dict[str, Any]) -> dict[str, Any]:
                 reason = "page_out_of_range"
             elif not isinstance(quote, str) or len(normalize(quote)) < 8:
                 reason = "quote_too_short_or_missing"
-            elif normalize(quote) not in normalize(documents[document_id]["pages"][page - 1]):
+            elif not _contains_normalized_quote(documents[document_id]["pages"][page - 1], quote):
                 reason = "quote_not_found_on_page"
 
             valid = reason is None
