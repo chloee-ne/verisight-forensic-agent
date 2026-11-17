@@ -38,7 +38,7 @@ def run_verification(ctx, memo: dict) -> dict:
     if not isinstance(memo, dict):
         return _failure("Claims verification failed: memo must be an object.")
 
-    raw_findings = memo.get("findings") or []
+    raw_findings = memo.get("findings", [])
     if not isinstance(raw_findings, list):
         return _failure("Claims verification failed: memo findings must be a list.")
 
@@ -48,13 +48,15 @@ def run_verification(ctx, memo: dict) -> dict:
             return _failure(
                 f"Claims verification failed: memo finding {index + 1} must be an object."
             )
-        if finding.get("status") != "proven" or not finding.get("citations"):
+        if finding.get("status") != "proven":
             continue
-        citations = finding.get("citations")
+        citations = finding.get("citations", [])
         if not isinstance(citations, list):
             return _failure(
                 f"Claims verification failed: citations for memo finding {index + 1} must be a list."
             )
+        if not citations:
+            continue
         quotes = []
         for citation_index, citation in enumerate(citations):
             if not isinstance(citation, dict):
@@ -84,10 +86,19 @@ def run_verification(ctx, memo: dict) -> dict:
     if not findings:
         return {"passed": True, "skipped": True, "feedback": []}
 
+    # Escape markup delimiters in untrusted strings so evidence cannot close the
+    # surrounding prompt boundary. JSON unicode escapes preserve the represented text.
+    serialized_findings = json.dumps(findings, indent=1)
+    serialized_findings = (
+        serialized_findings.replace("<", r"\u003c")
+        .replace(">", r"\u003e")
+        .replace("&", r"\u0026")
+    )
+
     try:
         response = ctx.client.responses.create(
             model=model(),
-            input=PROMPT.format(findings=json.dumps(findings, indent=1)),
+            input=PROMPT.format(findings=serialized_findings),
             text={"format": {"type": "json_object"}},
         )
     except Exception as error:
