@@ -61,6 +61,19 @@ class ClaimSupportAgreementTest(unittest.TestCase):
         self.assertEqual(0.75, result["metrics"]["coverage"])
         self.assertEqual(0.6667, result["metrics"]["selective_accuracy_on_answered"])
 
+    def test_macro_f1_counts_observed_class_with_no_true_positives_as_zero(self) -> None:
+        data = {
+            **self.data,
+            "examples": [
+                {"id": "missed", "reference_label": "supports", "system_label": "contradicts"}
+            ],
+        }
+        result = evaluate(data)
+        self.assertEqual(0.0, result["per_class"]["supports"]["f1"])
+        self.assertEqual(0.0, result["per_class"]["contradicts"]["f1"])
+        self.assertIsNone(result["per_class"]["insufficient_evidence"]["f1"])
+        self.assertEqual(0.0, result["metrics"]["macro_f1_over_defined_classes"])
+
 
 if __name__ == "__main__":
     unittest.main()
