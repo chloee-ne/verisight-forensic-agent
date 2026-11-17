@@ -71,11 +71,10 @@ def evaluate(data: dict[str, Any]) -> dict[str, Any]:
         fn = sum(matrix[label][other] for other in PREDICTION_LABELS if other != label)
         precision = tp / (tp + fp) if tp + fp else None
         recall = tp / (tp + fn) if tp + fn else None
-        f1 = (
-            2 * precision * recall / (precision + recall)
-            if precision is not None and recall is not None and precision + recall
-            else None
-        )
+        # F1 is defined whenever the class has at least one true or predicted
+        # example. In that case, zero true positives must contribute F1 = 0.
+        f1_denominator = 2 * tp + fp + fn
+        f1 = 2 * tp / f1_denominator if f1_denominator else None
         per_class[label] = {
             "support": sum(matrix[label].values()),
             "precision": round(precision, 4) if precision is not None else None,
