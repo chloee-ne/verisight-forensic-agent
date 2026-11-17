@@ -107,6 +107,44 @@ class CitationBenchmarkTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "'documents'"):
             evaluate_case({"findings": []})
 
+    def test_quote_embedded_inside_longer_word_is_rejected(self) -> None:
+        case = {
+            "documents": {"DOC-A": {"pages": ["Xsupplier confirmed deliveryY"]}},
+            "findings": [
+                {
+                    "id": "partial-word",
+                    "citations": [
+                        {
+                            "document_id": "DOC-A",
+                            "page": 1,
+                            "quote": "supplier confirmed delivery",
+                        }
+                    ],
+                }
+            ],
+        }
+        result = evaluate_case(case)
+        self.assertFalse(result["findings"][0]["traceable"])
+        self.assertEqual("quote_not_found_on_page", result["citations"][0]["reason"])
+
+    def test_quote_with_surrounding_punctuation_is_accepted(self) -> None:
+        case = {
+            "documents": {"DOC-A": {"pages": ["The report states: “vendor confirmed delivery.”"]}},
+            "findings": [
+                {
+                    "id": "punctuation",
+                    "citations": [
+                        {
+                            "document_id": "DOC-A",
+                            "page": 1,
+                            "quote": "vendor confirmed delivery",
+                        }
+                    ],
+                }
+            ],
+        }
+        self.assertTrue(evaluate_case(case)["findings"][0]["traceable"])
+
     def test_empty_findings_have_undefined_ratio(self) -> None:
         result = evaluate_case({"documents": {}, "findings": []})
         self.assertIsNone(result["metrics"]["finding_traceability"])
