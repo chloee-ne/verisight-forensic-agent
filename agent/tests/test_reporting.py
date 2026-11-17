@@ -192,6 +192,23 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("does not establish signature authenticity", output)
         self.assertIn("Human review", output)
 
+    def test_skipped_memo_verification_is_not_reported_as_passed(self):
+        data = self.sample()
+        data["case"]["memo_checks"] = [
+            {"check": "claims", "passed": True, "status": "skipped"}
+        ]
+
+        output = build_report_html(data)
+
+        self.assertIn(
+            "Latest memo verification:</strong> skipped",
+            output,
+        )
+        self.assertNotIn(
+            "Latest memo verification:</strong> passed",
+            output,
+        )
+
     def test_unsubmitted_memo_reports_verification_history_without_misleading_status(self):
         data = self.sample()
         data["case"]["memo"] = None
