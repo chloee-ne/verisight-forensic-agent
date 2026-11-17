@@ -183,9 +183,34 @@ and evidence-request / memo status.
 
 This is an illustrative prototype output, not a certified forensic opinion or a legal conclusion. Findings require independent human review.
 
+## Citation-Traceability Benchmark
+
+An offline, deterministic benchmark for citation traceability is available under
+`agent/benchmark/`. It checks whether citations reference an existing,
+non-privileged document page and whether the quoted text appears on that page.
+It includes synthetic fixtures and unit tests; it does not assess semantic
+support, source authenticity, or legal/forensic correctness.
+
+Run from `agent/`:
+
+```bash
+.venv/Scripts/python.exe -m benchmark.evaluate benchmark/sample_case.json
+.venv/Scripts/python.exe -m unittest tests.test_benchmark -v
+```
+
+See [the benchmark guide](agent/benchmark/README.md) for its scope, input format,
+metrics, and interpretation limits. Do not present its output as a forensic
+accuracy score.
+
+A separate experimental claim-support label-agreement evaluator is also
+available. It reports coverage, selective accuracy, per-class metrics, and a
+confusion matrix against explicitly supplied reference labels. Its bundled
+fixture is synthetic and is not a measurement of live model performance.
+See the benchmark guide for instructions and annotation requirements.
+
 ## Testing & Validation
 
-The following verification-enabled test suites were run locally on the `main` branch after the latest merge (November 15, 2026).
+The following test suites were run locally on the `feature/verisight-trust-and-benchmark` branch at commit `e7670ec`.
 
 ### Root Test Suite
 
@@ -203,16 +228,18 @@ Run from the `agent/` directory:
 VERIFICATION=on .venv/Scripts/python.exe -m unittest discover -s tests -v
 ```
 
-### Latest Test Results
+### Latest Local Test Results
 
 | Test Suite | Total Tests | Passed (non-skipped) | Skipped | Failed |
 |---|---:|---:|---:|---:|
 | Root suite | 75 | 64 | 11 | 0 |
-| Agent suite | 89 | 78 | 11 | 0 |
+| Agent suite | 108 | 97 | 11 | 0 |
 
-Both suites completed successfully with `OK`. The skipped tests are intentionally covered by the verification-enabled test modules; the two suite totals are separate and should not be added together as a count of unique tests.
+Both suites completed successfully with `OK`. The skipped tests are intentional: the verification-enabled run skips tests whose behavior is covered by the verification test modules. The two suite totals are separate and should not be added together as a count of unique tests.
 
 These results demonstrate automated software behavior, not independent validation of forensic accuracy or legal conclusions. Tests using mocked or offline components do not establish the reliability of live model outputs.
+
+GitHub Actions status checks were not available for this commit at the time of this audit. These are local test results, not a claim of CI success.
 
 ## Important Limitations
 

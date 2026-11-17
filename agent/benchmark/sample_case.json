@@ -1,0 +1,73 @@
+{
+  "case_id": "synthetic-contract-demo-001",
+  "description": "Synthetic fixture for deterministic citation traceability only.",
+  "privileged_document_ids": ["DOC-PRIV"],
+  "documents": {
+    "DOC-REPORT": {
+      "pages": [
+        "Project status: Open Severity 1 defects: 21. Overall status is green."
+      ]
+    },
+    "DOC-MINUTES": {
+      "pages": [
+        "Meeting minutes: The vendor confirmed the system is ready for go-live."
+      ]
+    },
+    "DOC-PRIV": {
+      "pages": [
+        "Privileged attorney work product. This document must not be cited."
+      ]
+    }
+  },
+  "findings": [
+    {
+      "id": "finding-valid",
+      "claim": "The report records 21 open Severity 1 defects.",
+      "citations": [
+        {
+          "document_id": "DOC-REPORT",
+          "page": 1,
+          "quote": "Open Severity 1 defects: 21"
+        }
+      ]
+    },
+    {
+      "id": "finding-wrong-page",
+      "claim": "The minutes record a ready statement.",
+      "citations": [
+        {
+          "document_id": "DOC-MINUTES",
+          "page": 2,
+          "quote": "The vendor confirmed the system is ready for go-live"
+        }
+      ]
+    },
+    {
+      "id": "finding-invented-quote",
+      "claim": "The report guarantees readiness.",
+      "citations": [
+        {
+          "document_id": "DOC-REPORT",
+          "page": 1,
+          "quote": "The project was fully approved with no defects"
+        }
+      ]
+    },
+    {
+      "id": "finding-privileged",
+      "claim": "Privileged material supports the conclusion.",
+      "citations": [
+        {
+          "document_id": "DOC-PRIV",
+          "page": 1,
+          "quote": "Privileged attorney work product"
+        }
+      ]
+    },
+    {
+      "id": "finding-no-citation",
+      "claim": "A finding without evidence must remain untraceable.",
+      "citations": []
+    }
+  ]
+}
