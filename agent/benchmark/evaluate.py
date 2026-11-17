@@ -40,7 +40,7 @@ def _contains_normalized_quote(page: str, quote: str) -> bool:
     normalized_quote = normalize(quote)
     if not normalized_quote:
         return False
-    pattern = rf"(?<!\\w){re.escape(normalized_quote)}(?!\\w)"
+    pattern = rf"(?<!\w){re.escape(normalized_quote)}(?!\w)"
     return re.search(pattern, normalized_page) is not None
 
 
