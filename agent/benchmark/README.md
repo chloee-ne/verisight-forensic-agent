@@ -28,7 +28,7 @@ On Windows with the project virtual environment:
 
 - **Citation precision:** valid citations divided by all citations. A citation is
   valid only when its document exists, it is not privileged, the page number is
-  in range, and a normalized quote of at least eight characters occurs on that page.
+  in range, and a normalized quote of at least eight characters occurs on that page. Quote matching enforces word boundaries, so a phrase embedded inside a longer word does not count as a match; surrounding punctuation is allowed.
 - **Finding traceability:** findings with at least one valid citation divided by
   all findings. Findings with no citations are untraceable.
 - **Failure reasons:** each invalid citation receives an explicit machine-readable
