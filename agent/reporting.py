@@ -291,12 +291,17 @@ def build_report_html(data: dict[str, Any]) -> str:
     if not memo_was_submitted:
         check_status = "not applicable — no memo submitted"
     else:
-        check_status = (
-            "passed" if isinstance(latest_memo_check, dict)
-            and latest_memo_check.get("passed") is True
-            else "failed" if isinstance(latest_memo_check, dict)
-            else "not run"
-        )
+        if not isinstance(latest_memo_check, dict):
+            check_status = "not run"
+        elif (
+            latest_memo_check.get("status") == "skipped"
+            or latest_memo_check.get("skipped") is True
+        ):
+            check_status = "skipped"
+        elif latest_memo_check.get("passed") is True:
+            check_status = "passed"
+        else:
+            check_status = "failed"
 
     memo_attempt_html = ""
     if not memo_was_submitted:
