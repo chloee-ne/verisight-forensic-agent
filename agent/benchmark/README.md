@@ -79,7 +79,8 @@ Run from `agent/`:
 
 Reported metrics include coverage, accuracy (with abstentions counted as
 incorrect), selective accuracy on answered examples, per-class precision/recall/F1,
-and a confusion matrix. The sample is explicitly marked `synthetic_demo`: its
+and a confusion matrix. Macro-F1 includes every class with at least one reference
+or predicted example; an observed class with no true positives contributes F1 = 0. The sample is explicitly marked `synthetic_demo`: its
 labels are illustrative, not actual VeriSight model outputs or independent
 human adjudications. For a real evaluation, export the system's actual labels
 and have qualified reviewers independently adjudicate the reference labels
